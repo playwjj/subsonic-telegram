@@ -1,0 +1,64 @@
+<script setup lang="ts">
+import { ref, watch } from "vue";
+import { getAlbum, coverArtUrl, type AlbumDetail } from "../api/subsonic";
+import { playQueue } from "../stores/player";
+import TrackRow from "../components/TrackRow.vue";
+
+const props = defineProps<{ id: string }>();
+const album = ref<AlbumDetail | null>(null);
+const error = ref("");
+
+async function load(id: string) {
+  error.value = "";
+  album.value = null;
+  try {
+    album.value = await getAlbum(id);
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "Failed to load";
+  }
+}
+watch(() => props.id, load, { immediate: true });
+
+function playFrom(index: number) {
+  if (album.value) playQueue(album.value.song, index);
+}
+</script>
+
+<template>
+  <div v-if="album" class="album-detail">
+    <div class="header">
+      <img v-if="album.coverArt" class="cover" :src="coverArtUrl(album.coverArt)" :alt="album.name" />
+      <div class="info">
+        <h1>{{ album.name }}</h1>
+        <RouterLink :to="{ name: 'artist', params: { id: album.artistId } }">{{ album.artist }}</RouterLink>
+        <p class="meta">{{ album.songCount }} 首{{ album.year ? ` · ${album.year}` : "" }}</p>
+        <button @click="playFrom(0)">▶ Play album</button>
+      </div>
+    </div>
+    <div class="tracks">
+      <TrackRow v-for="(song, i) in album.song" :key="song.id" :song="song" @play="playFrom(i)" />
+    </div>
+  </div>
+  <p v-else-if="error" class="error">{{ error }}</p>
+</template>
+
+<style scoped>
+.header {
+  display: flex;
+  gap: 1.25rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+.cover {
+  width: 10rem;
+  height: 10rem;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.meta {
+  opacity: 0.7;
+  font-size: 0.9rem;
+  margin: 0.3rem 0 0.8rem;
+}
+</style>

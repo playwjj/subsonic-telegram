@@ -33,6 +33,7 @@ Telegram Bot API（sendDocument 上传 / getFile+文件CDN 下载，支持 Range
 | `scripts/import.ts` | 本地导入脚本：扫描本地音乐目录，读 tag，传 Telegram，写 D1 |
 | `scripts/sync-tgfs.ts` | 一次性/增量迁移脚本：把已经通过 [TGFS](https://github.com/TheodoreKrypton/tgfs)（同一个 Bot/频道）传过的历史存量导入 D1，不重新上传字节 |
 | `scripts/import-m3u.ts` | 从本地 `.m3u`/`.m3u8` 文件建/更新 Subsonic playlist |
+| `web/` | 自带的 Web UI（Vue 3 + Vite），打包后由 Workers Static Assets 跟 API 一起提供，见下面 [Web UI](#web-ui) |
 
 ## 已实现的端点
 
@@ -40,7 +41,7 @@ Telegram Bot API（sendDocument 上传 / getFile+文件CDN 下载，支持 Range
 
 还没做（用得上再加）：`scrobble`、`getRandomSongs`、`getStarred`。
 
-**客户端兼容性备注**：根路径 `/`（不带 `/rest`）固定返回 `200`。部分 Subsonic 客户端（实测 Amperfy）在真正调用 API 之前会先探测裸的服务器地址，把非 2xx 响应当成"服务器不存在"，导致登录直接报 404——这个兼容处理见 `src/index.ts` 里对 `url.pathname === "/"` 的特判。
+**客户端兼容性备注**：部分 Subsonic 客户端（实测 Amperfy）在真正调用 API 之前会先探测裸的服务器地址 `/`，把非 2xx 响应当成"服务器不存在"，导致登录直接报 404。现在 `/`（连同其它非 `/rest/*` 路径）由 Web UI 的静态资源应答，天然是 `200`，这个兼容问题顺带解决了，见下面 [Web UI](#web-ui)。
 
 ## 部署方式：Cloudflare Git 集成（Workers Builds）
 
@@ -87,9 +88,11 @@ wrangler d1 execute subsonic-telegram --remote --command \
 
 两种方式设一次就持久化在 Worker 上，以后 git push 触发的重新部署不会清掉。
 
-**6. （可选）自定义域名**：Worker 的 Settings → Domains & Routes 里加域名，再去 Cloudflare DNS 配对应记录。这跟传统"nginx 反代 + Origin CA 证书"那一套不是一回事——Workers 自定义域名由 Cloudflare 直接签发证书，不需要自己搞 nginx/证书。
+**6. 设置构建命令**（Web UI 需要，见下面 [Web UI](#web-ui)）：Cloudflare Dashboard → 该 Worker → Settings → Build → Build command 填 `npm run build`。Workers Builds 不会自动跑 `package.json` 里的 `build` 脚本，不设这个 Web UI 就不会被打包进部署（`wrangler.toml` 里 `[assets] directory` 指向的 `web/dist` 会是空的/不存在，部署直接失败）。
 
-**7. 验证**：`curl https://<worker地址>/rest/ping.view?u=<用户名>&p=<密码>&v=1.16.1&c=test&f=json`，应该返回 `{"subsonic-response":{"status":"ok",...}}`。
+**7. （可选）自定义域名**：Worker 的 Settings → Domains & Routes 里加域名，再去 Cloudflare DNS 配对应记录。这跟传统"nginx 反代 + Origin CA 证书"那一套不是一回事——Workers 自定义域名由 Cloudflare 直接签发证书，不需要自己搞 nginx/证书。
+
+**8. 验证**：`curl https://<worker地址>/rest/ping.view?u=<用户名>&p=<密码>&v=1.16.1&c=test&f=json`，应该返回 `{"subsonic-response":{"status":"ok",...}}`。
 
 ## 导入本地音乐库
 
@@ -144,6 +147,35 @@ npm run import-m3u -- /path/to/playlist.m3u
 ```
 
 原理是拿 `.m3u` 里列的每个文件路径，换算成相对 `LOCAL_MUSIC_DIR`（或 `--music-dir=` 指定的目录）的路径，去 D1 按 `source_path` 精确匹配已导入的 track——**所以 `.m3u` 里引用的歌必须先用 `npm run import` 导入过**，没导入的会在结尾列出来，提示去先导入。重跑同一个 `.m3u` 文件会更新同名 playlist（按名字算出固定 id），不会重复建。
+
+## Web UI
+
+`web/` 是一个 Vue 3 + Vite 单页应用，直接调 `/rest/*` API（跟第三方 Subsonic 客户端走的是同一套接口），提供浏览歌库、播放、管理 playlist 的界面——不做上传/编辑，那部分场景交给上面的脚本。
+
+**怎么跟 Worker 拼在一起**：Cloudflare Workers 的 Static Assets 功能，`wrangler.toml` 里配的：
+
+```toml
+[assets]
+directory = "./web/dist"
+binding = "ASSETS"
+run_worker_first = ["/rest/*"]
+not_found_handling = "single-page-application"
+```
+
+`run_worker_first` 只对 `/rest/*` 生效，意味着别的路径（`/`、`/playlists/xxx` 等）**根本不会进 `src/index.ts`**，直接由 Cloudflare 从 `web/dist` 静态返回（`not_found_handling = "single-page-application"` 让 Vue Router 的客户端路由刷新/直接访问也能命中 `index.html`）。这也是为什么之前给 Amperfy 打的那个"根路径特判"补丁被删掉了——现在 `/` 天然由真实的 `index.html` 应答。
+
+**鉴权模型**：登录界面收集用户名密码，跟其它 Subsonic 客户端一样存在浏览器本地（`localStorage`），之后每个 API/`stream`/`getCoverArt` 请求都带上——这意味着密码会出现在这些请求的 URL 查询参数里（浏览器历史、Performance API 等能看到），是 Subsonic 协议这套经典鉴权方式本身的特性，不是这个 Web UI 独有的新增风险，个人单用户部署下可接受。
+
+**本地开发**：
+
+```bash
+cd web
+npm install
+npm run dev              # 默认代理 /rest 到 http://127.0.0.1:8787（wrangler dev）
+VITE_API_PROXY_TARGET=https://<你的worker地址> npm run dev   # 或者直接代理到已部署的真实后端
+```
+
+**构建/部署**：根目录 `npm run build`（= `npm --prefix web ci && npm --prefix web run build`）会把 `web/dist` 建出来，`wrangler deploy`/Git 集成部署时由 `[assets]` 一并发布。**本地第一次跑 `wrangler dev`/`wrangler deploy` 之前必须先跑一次这个 build**，`web/dist` 目录不存在的话 wrangler 会直接报错拒绝启动。Git 集成走的是 Cloudflare Dashboard 的 Build command（见上面部署步骤第 6 步），不是这里的 `npm run build`——两处都要配对。
 
 ## 本地开发 / 测试
 
