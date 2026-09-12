@@ -245,6 +245,77 @@ export default {
         );
       }
 
+      // The endpoints below aren't part of the official Subsonic API — they
+      // exist for this project's own web UI (web/), which is a first-party
+      // consumer of this same /rest/* surface. Third-party Subsonic clients
+      // simply won't call endpoint names they don't know about.
+
+      case "getLibraryStats": {
+        const stats = await q.getLibraryStats(env.DB);
+        return respond(
+          subsonicSuccess(
+            node("libraryStats", {
+              artistCount: stats.artist_count,
+              albumCount: stats.album_count,
+              songCount: stats.song_count,
+              totalDuration: stats.total_duration,
+            }),
+          ),
+          format,
+        );
+      }
+
+      case "getSongs": {
+        const size = Math.min(Number(params.get("size") ?? 50), 500);
+        const offset = Number(params.get("offset") ?? 0);
+        const sort = params.get("sort") ?? "title";
+        const { tracks, total } = await q.listAllTracks(env.DB, { limit: size, offset, sort });
+        return respond(
+          subsonicSuccess(node("songs", { total }, { lists: { song: tracks.map(songNode) } })),
+          format,
+        );
+      }
+
+      case "getRecentlyPlayed":
+      case "getMostPlayed": {
+        const size = Math.min(Number(params.get("size") ?? 20), 500);
+        const tracks =
+          endpoint === "getRecentlyPlayed"
+            ? await q.getRecentlyPlayed(env.DB, size)
+            : await q.getMostPlayed(env.DB, size);
+        const tag = endpoint === "getRecentlyPlayed" ? "recentlyPlayed" : "mostPlayed";
+        return respond(subsonicSuccess(node(tag, undefined, { lists: { song: tracks.map(songNode) } })), format);
+      }
+
+      case "getFolder": {
+        const path = params.get("path") ?? "";
+        const rows = await q.listTracksUnderPath(env.DB, path);
+        const prefixLen = path ? path.length + 1 : 0;
+        const dirs = new Set<string>();
+        const tracks: typeof rows = [];
+        for (const row of rows) {
+          const rest = (row.source_path ?? "").slice(prefixLen);
+          const slashIdx = rest.indexOf("/");
+          if (slashIdx === -1) tracks.push(row);
+          else dirs.add(rest.slice(0, slashIdx));
+        }
+        return respond(
+          subsonicSuccess(
+            node(
+              "folder",
+              { path },
+              {
+                lists: {
+                  dir: [...dirs].sort((a, b) => a.localeCompare(b)).map((name) => node("dir", { name })),
+                  song: tracks.map(songNode),
+                },
+              },
+            ),
+          ),
+          format,
+        );
+      }
+
       default:
         return respond(subsonicError(0, `Unsupported endpoint: ${endpoint}`), format);
     }

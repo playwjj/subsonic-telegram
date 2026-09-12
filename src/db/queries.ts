@@ -38,6 +38,7 @@ export interface TrackRow {
   genre: string | null;
   play_count: number;
   last_played: number | null;
+  source_path: string | null;
 }
 
 const ARTIST_SELECT = `
@@ -389,6 +390,77 @@ export async function getStarredTracks(db: D1Database, owner: string): Promise<T
        ORDER BY t.title COLLATE NOCASE`,
     )
     .bind(owner)
+    .all<TrackRow>();
+  return results;
+}
+
+export interface LibraryStats {
+  artist_count: number;
+  album_count: number;
+  song_count: number;
+  total_duration: number;
+}
+
+export async function getLibraryStats(db: D1Database): Promise<LibraryStats> {
+  const row = await db
+    .prepare(
+      `SELECT (SELECT COUNT(*) FROM artists) as artist_count,
+              (SELECT COUNT(*) FROM albums) as album_count,
+              (SELECT COUNT(*) FROM tracks) as song_count,
+              (SELECT COALESCE(SUM(duration), 0) FROM tracks) as total_duration`,
+    )
+    .first<LibraryStats>();
+  return row!;
+}
+
+const SONG_SORT_COLUMNS: Record<string, string> = {
+  title: "t.title COLLATE NOCASE",
+  artist: "t.artist_name COLLATE NOCASE",
+  recent: "t.created_at DESC",
+  mostPlayed: "t.play_count DESC",
+};
+
+export interface ListAllTracksResult {
+  tracks: TrackRow[];
+  total: number;
+}
+
+export async function listAllTracks(
+  db: D1Database,
+  opts: { limit: number; offset: number; sort: string },
+): Promise<ListAllTracksResult> {
+  const orderBy = SONG_SORT_COLUMNS[opts.sort] ?? SONG_SORT_COLUMNS.title;
+  const [{ results: tracks }, totalRow] = await Promise.all([
+    db
+      .prepare(`${TRACK_SELECT} ORDER BY ${orderBy} LIMIT ? OFFSET ?`)
+      .bind(opts.limit, opts.offset)
+      .all<TrackRow>(),
+    db.prepare(`SELECT COUNT(*) as total FROM tracks`).first<{ total: number }>(),
+  ]);
+  return { tracks, total: totalRow?.total ?? 0 };
+}
+
+export async function getRecentlyPlayed(db: D1Database, limit: number): Promise<TrackRow[]> {
+  const { results } = await db
+    .prepare(`${TRACK_SELECT} WHERE t.last_played IS NOT NULL ORDER BY t.last_played DESC LIMIT ?`)
+    .bind(limit)
+    .all<TrackRow>();
+  return results;
+}
+
+export async function getMostPlayed(db: D1Database, limit: number): Promise<TrackRow[]> {
+  const { results } = await db
+    .prepare(`${TRACK_SELECT} WHERE t.play_count > 0 ORDER BY t.play_count DESC LIMIT ?`)
+    .bind(limit)
+    .all<TrackRow>();
+  return results;
+}
+
+export async function listTracksUnderPath(db: D1Database, prefix: string): Promise<TrackRow[]> {
+  const pattern = prefix ? `${prefix}/%` : "%";
+  const { results } = await db
+    .prepare(`${TRACK_SELECT} WHERE t.source_path LIKE ? ORDER BY t.source_path COLLATE NOCASE`)
+    .bind(pattern)
     .all<TrackRow>();
   return results;
 }
