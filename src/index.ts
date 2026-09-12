@@ -432,6 +432,15 @@ export default {
         return respond(subsonicSuccess(node("folder", { path: fullPath })), format);
       }
 
+      case "deleteFolder": {
+        const path = params.get("path");
+        if (!path) return respond(subsonicError(ERR.MISSING_PARAM, "Missing path"), format);
+        const result = await q.deleteFolder(env.DB, path);
+        if (result === "not_found") return respond(subsonicError(ERR.NOT_FOUND, "Folder not found"), format);
+        if (result === "not_empty") return respond(subsonicError(0, "Folder is not empty"), format);
+        return respond(subsonicSuccess(), format);
+      }
+
       case "renameFolder": {
         const path = params.get("path");
         const name = params.get("name");

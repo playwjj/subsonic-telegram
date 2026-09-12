@@ -25,7 +25,7 @@ There's no long-running server in this setup — the Worker is invoked per-reque
 - [Importing a local music library](#importing-a-local-music-library)
 - [Playlists](#playlists)
 - [Web UI](#web-ui)
-  - [Uploading a track from the Web UI](#uploading-a-track-from-the-web-ui)
+  - [Managing the library from the Web UI](#managing-the-library-from-the-web-ui)
 - [Local development / testing](#local-development--testing)
 - [Security / single-user assumptions](#security--single-user-assumptions)
 - [Contributing](#contributing)
@@ -162,21 +162,23 @@ This works by taking each file path listed in the `.m3u`, converting it to a pat
 
 ## Web UI
 
-`web/` is a Vue 3 + Vite single-page app that calls the `/rest/*` API directly (the same interface third-party Subsonic clients use), providing a browsing/playback/playlist-management UI, plus one-at-a-time upload/delete/folder-rename for managing the library directly from the browser (bulk import still stays the CLI script's job — see [Uploading a track from the Web UI](#uploading-a-track-from-the-web-ui) below).
+`web/` is a Vue 3 + Vite single-page app that calls the `/rest/*` API directly (the same interface third-party Subsonic clients use), providing a browsing/playback/playlist-management UI, plus one-at-a-time upload/delete/folder create-rename-delete for managing the library directly from the browser (bulk import still stays the CLI script's job — see [Managing the library from the Web UI](#managing-the-library-from-the-web-ui) below).
 
 **Pages**: Home (library stats + recently added/recently played/most played), Artists (browse by ID3 artist/album), Songs (a flat, sortable, paginated track list), Folders (browse by the original local folder structure — see below), Search, Playlists.
 
 **What "Folders" is**: it reconstructs the original folder tree from `source_path` (recorded by `npm run import`, relative to the import root directory), as an alternative to the ID3-tag-based grouping that Artists uses. This is especially useful for "compilation" folders (e.g. a monthly hits chart) — where each song's ID3 artist tag differs, so browsing by Artists scatters them across dozens or hundreds of artist names, while browsing by Folders preserves the original "one folder, one compilation" structure intact. The backing endpoint is `getFolder` (in `src/index.ts`), which — like `getLibraryStats`/`getSongs`/`getRecentlyPlayed`/`getMostPlayed` — isn't part of the official Subsonic protocol; it only exists to serve this project's own Web UI.
 
-### Uploading a track from the Web UI
+### Managing the library from the Web UI
 
-The Upload page (nav bar → Upload) adds one track at a time — tags (artist/album/title/year/genre/track/disc number) are read client-side in the browser, via `music-metadata`'s `parseBlob`, and pre-fill an editable form; parsing failures just leave the fields blank (title falls back to the filename) rather than blocking the upload. The Worker itself does no tag parsing — this keeps it dependency-free and running in the plain Workers runtime, same as everywhere else in `src/`.
+The Upload page (nav bar → Upload, or "⬆ Upload here" from any Folders page — pre-fills the target folder) adds one track at a time — tags (artist/album/title/year/genre/track/disc number) are read client-side in the browser, via `music-metadata`'s `parseBlob`, and pre-fill an editable form; parsing failures just leave the fields blank (title falls back to the filename) rather than blocking the upload. The Worker itself does no tag parsing — this keeps it dependency-free and running in the plain Workers runtime, same as everywhere else in `src/`.
 
 - Same 19MB cap as `npm run import` (Telegram's `getFile` download limit) — a file that uploaded past that could never be streamed back, so it's rejected client-side and server-side both.
 - The optional "Folder" field (e.g. `80s/Rock`) sets `source_path`, so the track shows up under Folders too — leave it blank and the track just won't appear there (only under Artists/Songs).
 - Cover art isn't handled by this form; a new album created this way simply has no cover, same as any album whose `cover_ref` is unset.
 - **Deleting a track** (a 🗑 button on Songs/Album/Folders rows — not on playlist or search views, which have their own non-destructive "remove from playlist"/nothing) permanently removes the track from D1 (cleaning up any playlist entries and star, and the album/artist too if that was their last track) and best-effort deletes the Telegram message (see the "Delete Messages" bot permission note above).
 - **Renaming a folder** (the ✎ button next to a subfolder, or next to the current folder's own breadcrumb segment) only renames that one path segment — it updates every affected track's `source_path` in D1, nothing on the Telegram side.
+- **Creating an empty folder** ("+ New folder" on any Folders page) registers a path in a small `folders` D1 table — folders are otherwise purely derived from tracks' `source_path`, so this is the only way to have one exist before anything's been uploaded into it. `getFolder` merges both sources when listing a directory.
+- **Deleting a folder** (the 🗑 next to a subfolder, or next to the current folder's own breadcrumb once it has nothing left in it) only removes that `folders` registration — it's refused with "Folder is not empty" if it still has tracks or a nested folder in it, so this never deletes tracks. Use the track delete button for that first.
 
 **Styling**: Tailwind CSS v4 (via `@tailwindcss/vite`, no separate `postcss.config.js` needed), a single dark theme, hand-rolled `.glass` frosted-glass cards plus fixed, blurred gradient "aurora" background blobs — no light/dark theme toggle.
 

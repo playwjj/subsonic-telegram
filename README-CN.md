@@ -25,7 +25,7 @@
 - [导入本地音乐库](#导入本地音乐库)
 - [Playlist](#playlist)
 - [Web UI](#web-ui)
-  - [从 Web UI 上传歌曲](#从-web-ui-上传歌曲)
+  - [从 Web UI 管理歌库](#从-web-ui-管理歌库)
 - [本地开发 / 测试](#本地开发--测试)
 - [安全 / 单用户假设](#安全--单用户假设)
 - [贡献](#贡献)
@@ -162,21 +162,23 @@ npm run import-m3u -- /path/to/playlist.m3u
 
 ## Web UI
 
-`web/` 是一个 Vue 3 + Vite 单页应用，直接调 `/rest/*` API（跟第三方 Subsonic 客户端走的是同一套接口），提供浏览歌库、播放、管理 playlist 的界面，另外还支持在浏览器里逐首上传/删除歌曲、给文件夹改名（批量导入还是交给上面的 CLI 脚本），细节见下面的[从 Web UI 上传歌曲](#从-web-ui-上传歌曲)。
+`web/` 是一个 Vue 3 + Vite 单页应用，直接调 `/rest/*` API（跟第三方 Subsonic 客户端走的是同一套接口），提供浏览歌库、播放、管理 playlist 的界面，另外还支持在浏览器里逐首上传/删除歌曲、创建/改名/删除文件夹（批量导入还是交给上面的 CLI 脚本），细节见下面的[从 Web UI 管理歌库](#从-web-ui-管理歌库)。
 
 **页面**：Home（库统计 + 最近新增/最近播放/最多播放）、Artists（按 ID3 艺人/专辑浏览）、Songs（扁平化全曲目列表，支持排序分页）、Folders（按导入时的本地文件夹结构浏览，见下）、Search、Playlists。
 
 **Folders 是什么**：按 `source_path`（`npm run import` 记录的、相对导入根目录的路径）还原出原始文件夹树，跟 Artists 那种按 ID3 标签分组的浏览方式并列存在。对那些"合集"文件夹（比如按月份存的热歌榜）特别有用——这类文件夹里每首歌的 ID3 艺人标签都不一样，按 Artists 浏览会被打散到几十上百个艺人名下，按 Folders 浏览则完全保留原来"一个文件夹一份合集"的样子。对应的后端接口是 `getFolder`（`src/index.ts`），跟 `getLibraryStats`/`getSongs`/`getRecentlyPlayed`/`getMostPlayed` 一样，都不是 Subsonic 官方协议的一部分，只服务于这个项目自己的 Web UI。
 
-### 从 Web UI 上传歌曲
+### 从 Web UI 管理歌库
 
-Upload 页面（导航栏里的 Upload）一次加一首歌——标签（艺人/专辑/曲名/年份/流派/曲目号/碟号）是在浏览器里用 `music-metadata` 的 `parseBlob` 解析出来的，预填到一个可编辑的表单里；解析失败就把字段留空（标题会退回用文件名），不会卡住上传流程。Worker 那边完全不做标签解析——这样才能保持它无额外依赖、跑在纯 Workers 运行时里，跟 `src/` 下其它代码风格一致。
+Upload 页面（导航栏里的 Upload，或者在任意 Folders 页面点"⬆ Upload here"——会自动带上当前文件夹）一次加一首歌——标签（艺人/专辑/曲名/年份/流派/曲目号/碟号）是在浏览器里用 `music-metadata` 的 `parseBlob` 解析出来的，预填到一个可编辑的表单里；解析失败就把字段留空（标题会退回用文件名），不会卡住上传流程。Worker 那边完全不做标签解析——这样才能保持它无额外依赖、跑在纯 Workers 运行时里，跟 `src/` 下其它代码风格一致。
 
 - 跟 `npm run import` 一样是 19MB 上限（Telegram `getFile` 的下载限制）——超过这个大小的文件即使传上去了也永远放不回来，所以前端和后端都会拒绝。
 - 可选的"Folder"字段（比如 `80s/Rock`）会设置 `source_path`，这样这首歌也会出现在 Folders 视图里——留空的话就只出现在 Artists/Songs 里，不会出现在 Folders。
 - 这个表单不处理封面——用它建的新专辑就是没有封面，跟任何 `cover_ref` 为空的专辑一样。
 - **删除歌曲**（Songs/Album/Folders 列表行上的 🗑 按钮——playlist 和搜索结果视图没有这个按钮，它们各自已经有语义不同的"从歌单移除"/什么都没有）会把这首歌从 D1 永久删除（顺带清理它在 playlist、收藏里的引用，如果这是所在专辑/艺人的最后一首歌，专辑/艺人也会一并删除），并尽力删除对应的 Telegram 消息（见上面「删除消息」bot 权限那条说明）。
 - **文件夹改名**（子文件夹旁边的 ✎ 按钮，或者当前文件夹自己面包屑那一段旁边的 ✎ 按钮）只改这一段路径本身——会更新受影响的每条 track 在 D1 里的 `source_path`，不涉及 Telegram 那边。
+- **创建空文件夹**（任意 Folders 页面里的"+ New folder"）会在一张小的 `folders` 表里登记一个路径——文件夹本来完全是从 track 的 `source_path` 推算出来的，这是唯一能让一个文件夹在还没传任何歌进去之前就存在的办法。`getFolder` 会把这两个来源合并展示。
+- **删除文件夹**（子文件夹旁边的 🗑，或者当前文件夹自己不再有任何内容时、面包屑旁边的 🗑）只会删掉这条 `folders` 登记——如果里面还有歌或者还有嵌套的子文件夹，会被拒绝并提示"Folder is not empty"，所以这个操作永远不会顺带删掉歌曲。想删歌请先用歌曲那边的删除按钮。
 
 **样式**：Tailwind CSS v4（通过 `@tailwindcss/vite`，不需要单独的 `postcss.config.js`），单一深色主题，手写 `.glass` 毛玻璃卡片 + 固定定位的模糊渐变"极光"背景块，没有做明暗双主题切换。
 

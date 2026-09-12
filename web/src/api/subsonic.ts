@@ -329,3 +329,7 @@ export async function renameFolder(path: string, name: string): Promise<void> {
 export async function createFolder(parentPath: string, name: string): Promise<void> {
   await call("createFolder", { path: parentPath, name });
 }
+
+export async function deleteFolder(path: string): Promise<void> {
+  await call("deleteFolder", { path });
+}

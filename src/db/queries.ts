@@ -605,6 +605,23 @@ export async function createFolder(db: D1Database, path: string): Promise<void> 
     .run();
 }
 
+export type DeleteFolderResult = "deleted" | "not_found" | "not_empty";
+
+// Only removes the folders registration itself — never touches tracks, so a
+// folder with anything under it (tracks, or a nested folder registration)
+// is refused rather than silently orphaning content. Use deleteTrackCascade
+// to actually remove tracks first.
+export async function deleteFolder(db: D1Database, path: string): Promise<DeleteFolderResult> {
+  const [tracks, nestedFolders] = await Promise.all([
+    listTracksUnderPath(db, path),
+    listFoldersUnderPath(db, path),
+  ]);
+  if (tracks.length > 0 || nestedFolders.length > 0) return "not_empty";
+
+  const result = await db.prepare(`DELETE FROM folders WHERE path = ?`).bind(path).run();
+  return result.meta.changes > 0 ? "deleted" : "not_found";
+}
+
 // Renames just the leaf segment of a folder — every track whose source_path
 // starts with oldPrefix + "/" gets that prefix swapped for newPrefix.
 // Returns how many tracks moved (0 means the folder didn't exist).

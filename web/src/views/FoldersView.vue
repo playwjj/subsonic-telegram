@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { getFolder, renameFolder, createFolder, deleteTrack, type Song } from "../api/subsonic";
+import { getFolder, renameFolder, createFolder, deleteFolder, deleteTrack, SubsonicError, type Song } from "../api/subsonic";
 import { playQueue } from "../stores/player";
 import TrackRow from "../components/TrackRow.vue";
 
@@ -22,9 +22,11 @@ const currentPath = computed(() => segments.value.join("/"));
 const dirs = ref<string[]>([]);
 const songs = ref<Song[]>([]);
 const loading = ref(true);
+const error = ref("");
 
 async function load(path: string) {
   loading.value = true;
+  error.value = "";
   const result = await getFolder(path);
   dirs.value = result.dirs;
   songs.value = result.songs;
@@ -93,6 +95,30 @@ async function confirmCreateFolder() {
   await load(currentPath.value);
 }
 
+async function handleDeleteDir(dir: string) {
+  if (!confirm(`Delete empty folder "${dir}"?`)) return;
+  error.value = "";
+  const fullPath = [...segments.value, dir].join("/");
+  try {
+    await deleteFolder(fullPath);
+    await load(currentPath.value);
+  } catch (e) {
+    error.value = e instanceof SubsonicError ? e.message : "Delete failed";
+  }
+}
+
+async function handleDeleteSelf() {
+  const name = segments.value[segments.value.length - 1];
+  if (!confirm(`Delete empty folder "${name}"?`)) return;
+  error.value = "";
+  try {
+    await deleteFolder(currentPath.value);
+    await router.push({ name: "folders", params: { path: segments.value.slice(0, -1) } });
+  } catch (e) {
+    error.value = e instanceof SubsonicError ? e.message : "Delete failed";
+  }
+}
+
 async function handleDelete(song: Song) {
   if (!confirm(`Permanently delete "${song.title}"? This also removes the file from Telegram.`)) return;
   await deleteTrack(song.id);
@@ -119,6 +145,14 @@ async function handleDelete(song: Song) {
         <template v-else-if="i === segments.length - 1">
           <RouterLink :to="breadcrumbTo(i)" class="hover:text-[var(--text)]">{{ seg }}</RouterLink>
           <button class="edit-btn" title="Rename this folder" @click="startRenameSelf">✎</button>
+          <button
+            v-if="!loading && !dirs.length && !songs.length"
+            class="edit-btn"
+            title="Delete this empty folder"
+            @click="handleDeleteSelf"
+          >
+            🗑
+          </button>
         </template>
         <RouterLink v-else :to="breadcrumbTo(i)" class="hover:text-[var(--text)]">{{ seg }}</RouterLink>
       </template>
@@ -159,9 +193,14 @@ async function handleDelete(song: Song) {
           @blur="confirmRenameDir(dir)"
         />
         <RouterLink v-else :to="{ name: 'folders', params: { path: [...segments, dir] } }" class="flex-1">{{ dir }}</RouterLink>
-        <button v-if="renamingDir !== dir" class="edit-btn" title="Rename folder" @click="startRenameDir(dir)">✎</button>
+        <template v-if="renamingDir !== dir">
+          <button class="edit-btn" title="Rename folder" @click="startRenameDir(dir)">✎</button>
+          <button class="edit-btn" title="Delete (must be empty)" @click="handleDeleteDir(dir)">🗑</button>
+        </template>
       </div>
     </div>
+
+    <p v-if="error" class="error mb-4">{{ error }}</p>
 
     <div v-if="songs.length" class="glass p-2">
       <TrackRow
