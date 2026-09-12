@@ -50,6 +50,11 @@ function formatTime(sec: number): string {
   gap: 0.75rem;
   padding: 0.6rem 1rem;
   z-index: 20;
+  /* Floats over actively scrolling content, so it needs to read as solid —
+     the shared .glass tint (5% white) is too subtle here and looked
+     see-through against whatever track list is scrolled underneath it. */
+  background: rgba(23, 26, 33, 0.92);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 .cover {
   width: 2.5rem;
