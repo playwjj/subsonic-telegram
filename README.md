@@ -119,8 +119,9 @@ Git 集成是从仓库里的 `wrangler.toml` 读配置的，占位符不改掉�
 2. 跑：
    ```bash
    npm run import -- /path/to/music
+   npm run import -- /path/to/music --limit=300   # 覆盖默认的单次 100 个上限
    ```
-   会递归扫描目录下的 mp3/flac/m4a/ogg/opus/wav，读 tag（艺人/专辑/标题/年份/流派/封面），上传到 Telegram，写入 D1。超过 19MB 的文件会跳过并打印警告。
+   会递归扫描目录下的 mp3/flac/m4a/ogg/opus/wav（自动跳过 macOS 在非 HFS+ 盘上产生的 `._` 开头的 AppleDouble 影子文件——那不是音频，混进去只会生成一堆时长 0、"Unknown Artist" 的垃圾 track），读 tag（艺人/专辑/标题/年份/流派/封面），上传到 Telegram，写入 D1。超过 19MB 的文件会跳过并打印警告。**每次最多上传 100 个新文件**（`--limit=` 可覆盖），处理完这批就退出；库大的话多跑几次同一条命令，靠下面第 3 点的本地状态文件自动接着传，不会重复。
 3. 已经传过的文件记在本地 `.import-state.json`（不提交进 git），下次跑同一个目录会自动跳过，可以随时中断重跑。**去重只看本地这个文件，不查 D1**（有意的取舍——省 D1 读配额），代价是如果这个文件丢了/搬了机器，重跑会把同一批文件重新传一遍 Telegram（D1 那边不会出现重复记录，因为 track id 冲突会被 `ON CONFLICT DO NOTHING` 挡住，但白传的那份 Telegram 消息就没人引用了）。
 4. 每条 track 会记一个 `source_path`（相对导入时传给命令行的那个目录的路径），是 [Playlist](#playlist) 那边靠 `.m3u` 匹配 track 的关键——**每次都要传同一个根目录**（建议固定用 `LOCAL_MUSIC_DIR` 那个值），不然同一首歌在不同次 import 里 `source_path` 算出来不一样，匹配不上。
 

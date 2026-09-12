@@ -3,7 +3,11 @@
 // D1 over Cloudflare's HTTP API (D1 bindings only exist inside a Worker, so a
 // plain Node script has to go through the REST API instead of wrangler).
 //
-// Usage: npm run import -- /path/to/music
+// Usage: npm run import -- /path/to/music [--limit=N]
+// Uploads at most `--limit` new files per run (default 100) so a huge
+// library gets imported in batches rather than one long-running command —
+// already-imported files are skipped via .import-state.json, so just
+// re-running the same command picks up where the last run left off.
 import "dotenv/config";
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -11,10 +15,15 @@ import path from "node:path";
 import { parseFile } from "music-metadata";
 
 const MUSIC_DIR = process.argv[2];
-if (!MUSIC_DIR) {
-  console.error("Usage: npm run import -- /path/to/music");
+if (!MUSIC_DIR || MUSIC_DIR.startsWith("--")) {
+  console.error("Usage: npm run import -- /path/to/music [--limit=N]");
   process.exit(1);
 }
+
+const LIMIT = (() => {
+  const arg = process.argv.find((a) => a.startsWith("--limit="));
+  return arg ? Number(arg.slice("--limit=".length)) : 100;
+})();
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -69,6 +78,10 @@ async function saveState(done: Set<string>): Promise<void> {
 
 async function* walk(dir: string): AsyncGenerator<string> {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
+    // macOS writes "._<name>" AppleDouble sidecar files (resource forks) next
+    // to real files on non-HFS+ volumes (exFAT/FAT32 external drives, zip
+    // extracts, etc). They're not audio — skip them.
+    if (entry.name.startsWith("._")) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) yield* walk(full);
     else if (AUDIO_EXT[path.extname(entry.name).toLowerCase()]) yield full;
@@ -140,9 +153,14 @@ async function main() {
   const done = await loadState();
   let imported = 0;
   let skipped = 0;
+  let hitLimit = false;
 
   for await (const file of walk(MUSIC_DIR)) {
     if (done.has(file)) continue;
+    if (imported >= LIMIT) {
+      hitLimit = true;
+      break;
+    }
 
     const stats = await stat(file);
     if (stats.size > MAX_FILE_BYTES) {
@@ -209,6 +227,9 @@ async function main() {
 
   await saveState(done);
   console.log(`Done. Imported ${imported} new tracks, skipped ${skipped} (too large).`);
+  if (hitLimit) {
+    console.log(`Hit the --limit=${LIMIT} cap — run the same command again to import the next batch.`);
+  }
 }
 
 main();
