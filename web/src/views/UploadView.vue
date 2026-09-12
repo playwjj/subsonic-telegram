@@ -117,7 +117,7 @@ async function submit() {
 </script>
 
 <template>
-  <div class="max-w-xl">
+  <div class="mx-auto max-w-xl">
     <h1 class="mb-4 text-xl font-semibold">Upload</h1>
 
     <div class="glass space-y-4 p-4">

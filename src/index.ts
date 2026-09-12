@@ -364,26 +364,36 @@ export default {
         const sourcePath = folder ? `${folder}/${filename}` : null;
         const suffix = filename.includes(".") ? filename.slice(filename.lastIndexOf(".") + 1).toLowerCase() : "";
 
-        const artistId = await q.ensureArtist(env.DB, artistName);
-        const albumId = await q.ensureAlbum(env.DB, albumName, artistId, year, genre);
-        const fileRef = await storage.putFile(bytes, filename, contentType);
-        const trackId = await q.insertTrack(env.DB, {
-          albumId,
-          artistId,
-          title,
-          trackNo,
-          discNo,
-          duration,
-          suffix,
-          contentType,
-          size: bytes.byteLength,
-          bitrate,
-          fileRef,
-          sourcePath,
-          filename,
-        });
-        const track = await q.getTrack(env.DB, trackId);
-        return respond(subsonicSuccess(songNode(track!)), format);
+        // Without this, a thrown error here (most likely storage.putFile
+        // hitting Telegram) would propagate as an uncaught exception —
+        // Workers then returns a plain-text/HTML 500, which isn't valid
+        // JSON, so the client can't show the real reason and just reports a
+        // generic "Upload failed".
+        try {
+          const artistId = await q.ensureArtist(env.DB, artistName);
+          const albumId = await q.ensureAlbum(env.DB, albumName, artistId, year, genre);
+          const fileRef = await storage.putFile(bytes, filename, contentType);
+          const trackId = await q.insertTrack(env.DB, {
+            albumId,
+            artistId,
+            title,
+            trackNo,
+            discNo,
+            duration,
+            suffix,
+            contentType,
+            size: bytes.byteLength,
+            bitrate,
+            fileRef,
+            sourcePath,
+            filename,
+          });
+          const track = await q.getTrack(env.DB, trackId);
+          return respond(subsonicSuccess(songNode(track!)), format);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return respond(subsonicError(0, `Upload failed: ${message}`), format);
+        }
       }
 
       case "deleteTrack": {

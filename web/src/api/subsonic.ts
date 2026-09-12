@@ -302,7 +302,15 @@ export async function uploadTrack(file: File, metadata: UploadTrackMetadata): Pr
     getCredentials(),
   );
   const res = await fetch(`/rest/uploadTrack.view?${search.toString()}`, { method: "POST", body: file });
-  const data = (await res.json()) as { "subsonic-response": any };
+  // A non-2xx from in front of the Worker (e.g. an edge timeout/size limit)
+  // won't be JSON at all — surface the raw status instead of letting
+  // res.json() throw an opaque SyntaxError.
+  let data: { "subsonic-response": any };
+  try {
+    data = (await res.json()) as { "subsonic-response": any };
+  } catch {
+    throw new SubsonicError(0, `Upload failed: HTTP ${res.status} ${res.statusText}`);
+  }
   const body = data["subsonic-response"];
   if (body.status !== "ok") {
     throw new SubsonicError(body.error?.code ?? 0, body.error?.message ?? "Unknown error");
