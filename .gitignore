@@ -1,0 +1,10 @@
+node_modules/
+.env
+.env.*
+.dev.vars
+!.env.example
+.wrangler/
+dist/
+.import-state.json
+*.log
+.DS_Store

@@ -1,0 +1,53 @@
+import { node, type SNode } from "./node";
+import type { ArtistRow, AlbumRow, TrackRow } from "../db/queries";
+
+function isoDate(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toISOString();
+}
+
+export function artistNode(a: ArtistRow): SNode {
+  return node("artist", { id: a.id, name: a.name, albumCount: a.album_count });
+}
+
+export function albumNode(al: AlbumRow, opts?: { songs?: SNode[] }): SNode {
+  return node(
+    "album",
+    {
+      id: al.id,
+      name: al.name,
+      artist: al.artist_name,
+      artistId: al.artist_id,
+      songCount: al.song_count,
+      duration: al.duration,
+      created: isoDate(al.created_at),
+      year: al.year ?? undefined,
+      genre: al.genre ?? undefined,
+      coverArt: al.cover_ref ? al.id : undefined,
+    },
+    opts?.songs ? { lists: { song: opts.songs } } : undefined,
+  );
+}
+
+export function songNode(t: TrackRow): SNode {
+  return node("song", {
+    id: t.id,
+    parent: t.album_id,
+    isDir: false,
+    title: t.title,
+    album: t.album_name,
+    artist: t.artist_name,
+    track: t.track_no ?? undefined,
+    discNumber: t.disc_no ?? undefined,
+    year: t.year ?? undefined,
+    genre: t.genre ?? undefined,
+    size: t.size,
+    contentType: t.content_type,
+    suffix: t.suffix,
+    duration: t.duration ?? undefined,
+    bitRate: t.bitrate ?? undefined,
+    coverArt: t.album_id,
+    albumId: t.album_id,
+    artistId: t.artist_id,
+    type: "music",
+  });
+}

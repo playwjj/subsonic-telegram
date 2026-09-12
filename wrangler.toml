@@ -1,0 +1,11 @@
+name = "subsonic-telegram"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "subsonic-telegram"
+database_id = "REPLACE_AFTER_WRANGLER_D1_CREATE"
+
+# Set via `wrangler secret put TG_BOT_TOKEN` / `TG_CHANNEL_ID` before deploying.
+# For local dev, put them in .dev.vars (gitignored).
