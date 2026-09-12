@@ -13,14 +13,15 @@
 // obtain a document/file_id this project's bot can stream directly via
 // getFile — no bytes ever pass through this script.
 //
-// Already-synced tracks (by deterministic id, same scheme as import.ts) are
-// skipped without touching Telegram, so this is safe to re-run any time new
-// files show up in the TGFS metadata repo.
+// Already-synced tracks are tracked in a local state file (.sync-tgfs-state.json,
+// keyed by their path in the TGFS metadata repo) and skipped without touching
+// Telegram or D1, so this is safe to re-run any time new files show up in the
+// TGFS metadata repo.
 //
 // Usage: npm run sync-tgfs [-- --dry-run] [-- --limit=N]
 import "dotenv/config";
 import { createHash } from "node:crypto";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseFile } from "music-metadata";
 
@@ -44,6 +45,20 @@ const TGFS_GITHUB_TOKEN = requireEnv("TGFS_GITHUB_TOKEN");
 // duration/bitrate/tags that TGFS's metadata doesn't carry. If a matching
 // local file isn't found, falls back to parsing the folder/file names.
 const LOCAL_MUSIC_DIR = process.env.LOCAL_MUSIC_DIR;
+
+const STATE_FILE = path.join(process.cwd(), ".sync-tgfs-state.json");
+
+function loadState(): Set<string> {
+  try {
+    return new Set(JSON.parse(readFileSync(STATE_FILE, "utf-8")));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveState(done: Set<string>): void {
+  writeFileSync(STATE_FILE, JSON.stringify([...done]));
+}
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const LIMIT = (() => {
@@ -324,26 +339,35 @@ async function main() {
   let tracks = parseTracks(tree);
   console.log(`Found ${tracks.length} track placeholders in TGFS metadata`);
 
-  console.log("Loading already-synced track ids from D1...");
-  const existing = await d1<{ id: string }>("SELECT id FROM tracks");
-  const existingIds = new Set(existing.map((r) => r.id));
+  const done = loadState();
 
-  // The id actually written to D1 uses ID3-tag-enriched artist/album names
-  // (when a local copy is found), not the folder/filename-derived ones — so
-  // tags must be read (cheap: local disk only) before computing the id used
-  // to decide what's already synced. Only tracks that come out "new" go on
-  // to call Telegram (forwardMessage has side effects).
-  const pending: { track: ParsedTrack; tags: LocalTags }[] = [];
-
-  for (const t of tracks) {
-    const tags = await readLocalTags(t.localPath);
-    const artistId = md5(`artist:${(tags.artist ?? t.artist).toLowerCase()}`);
-    const albumId = md5(`album:${artistId}:${(tags.album ?? t.album).toLowerCase()}`);
-    const trackId = md5(`track:${albumId}:${t.filename}`);
-    if (existingIds.has(trackId)) continue;
-    pending.push({ track: t, tags });
+  if (process.argv.includes("--backfill-state")) {
+    // One-off recovery: match tracks against what's already in D1 (by the
+    // same deterministic id scheme) and mark them done locally, without any
+    // Telegram calls. Use this once if the state file is new/lost but D1
+    // already has rows from a previous run.
+    console.log("Backfilling local state from D1 (one bulk query, no Telegram calls)...");
+    const existing = await d1<{ id: string }>("SELECT id FROM tracks");
+    const existingIds = new Set(existing.map((r) => r.id));
+    let matched = 0;
+    for (const t of tracks) {
+      if (done.has(t.relPath)) continue;
+      const tags = await readLocalTags(t.localPath);
+      const artistId = md5(`artist:${(tags.artist ?? t.artist).toLowerCase()}`);
+      const albumId = md5(`album:${artistId}:${(tags.album ?? t.album).toLowerCase()}`);
+      const trackId = md5(`track:${albumId}:${t.filename}`);
+      if (existingIds.has(trackId)) {
+        done.add(t.relPath);
+        matched++;
+      }
+    }
+    saveState(done);
+    console.log(`Matched ${matched} tracks already in D1. State file now has ${done.size} entries.`);
+    return;
   }
-  console.log(`${tracks.length - pending.length} already synced, ${pending.length} new`);
+
+  const pending = tracks.filter((t) => !done.has(t.relPath));
+  console.log(`${tracks.length - pending.length} already synced (per local state file), ${pending.length} new`);
 
   const artistCache = new Map<string, string>();
   const albumCache = new Map<string, string>();
@@ -355,7 +379,7 @@ async function main() {
   const skipped: { track: ParsedTrack; reason: string }[] = [];
 
   for (let i = 0; i < toProcess.length; i++) {
-    const { track: t, tags } = toProcess[i];
+    const t = toProcess[i];
     const label = `[${i + 1}/${toProcess.length}] ${t.artist} / ${t.album} / ${t.title}`;
     try {
       const result = await resolveFile(t.descriptorMsgId);
@@ -365,6 +389,7 @@ async function main() {
         continue;
       }
 
+      const tags = await readLocalTags(t.localPath);
       const artistName = tags.artist ?? t.artist;
       const albumName = tags.album ?? t.album;
       const title = tags.title ?? t.title;
@@ -405,6 +430,10 @@ async function main() {
       }
       console.log(`${label} -> OK (${tags.duration ? "local tags" : "folder/filename only"})`);
       imported++;
+      if (!DRY_RUN) {
+        done.add(t.relPath);
+        if (imported % 20 === 0) saveState(done);
+      }
       await new Promise((r) => setTimeout(r, 300));
     } catch (e) {
       console.error(`${label} -> ERROR: ${e}`);
@@ -412,6 +441,7 @@ async function main() {
       await new Promise((r) => setTimeout(r, 1000));
     }
   }
+  if (!DRY_RUN) saveState(done);
 
   console.log(`\nDone. Imported ${imported}, skipped ${skipped.length}, already synced ${tracks.length - pending.length}`);
   if (skipped.length) {

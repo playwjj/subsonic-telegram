@@ -6,5 +6,6 @@ node_modules/
 .wrangler/
 dist/
 .import-state.json
+.sync-tgfs-state.json
 *.log
 .DS_Store
