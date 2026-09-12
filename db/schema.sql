@@ -42,10 +42,12 @@ CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist_id);
 CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks(title);
 CREATE INDEX IF NOT EXISTS idx_tracks_source_path ON tracks(source_path);
 
+-- owner is the single AUTH_USERNAME (see wrangler secrets), not a DB-managed
+-- account, so it's a plain string rather than a users(username) FK.
 CREATE TABLE IF NOT EXISTS playlists (
   id         TEXT PRIMARY KEY,
   name       TEXT NOT NULL,
-  owner      TEXT NOT NULL REFERENCES users(username),
+  owner      TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   changed_at INTEGER NOT NULL
 );
@@ -62,17 +64,12 @@ CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist ON playlist_tracks(playl
 -- 'track'; item_id references the matching table's id (not enforced via FK
 -- since it varies by item_type).
 CREATE TABLE IF NOT EXISTS starred (
-  owner      TEXT NOT NULL REFERENCES users(username),
+  owner      TEXT NOT NULL,
   item_type  TEXT NOT NULL,
   item_id    TEXT NOT NULL,
   starred_at INTEGER NOT NULL,
   PRIMARY KEY (owner, item_type, item_id)
 );
 
--- Subsonic legacy token auth (t = md5(password + salt)) needs the plaintext
--- password server-side to recompute the hash, so it's stored as-is here.
--- This is a single-user/personal deployment; do not reuse these passwords elsewhere.
-CREATE TABLE IF NOT EXISTS users (
-  username TEXT PRIMARY KEY,
-  password TEXT NOT NULL
-);
+-- Auth credentials live in the AUTH_USERNAME/AUTH_PASSWORD Worker secrets
+-- (see wrangler.toml), not in D1 — see src/auth.ts.

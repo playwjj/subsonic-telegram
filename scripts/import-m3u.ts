@@ -74,12 +74,8 @@ function parseM3U(text: string): string[] {
 async function main() {
   const name = flag("name") ?? path.basename(M3U_PATH, path.extname(M3U_PATH));
 
-  let owner = flag("owner");
-  if (!owner) {
-    const users = await d1<{ username: string }>("SELECT username FROM users LIMIT 1");
-    if (!users.length) throw new Error("No users in D1 and --owner not given");
-    owner = users[0].username;
-  }
+  const owner = flag("owner") ?? process.env.AUTH_USERNAME;
+  if (!owner) throw new Error("AUTH_USERNAME not set in .env and --owner not given");
 
   const raw = await readFile(M3U_PATH, "utf-8");
   const entries = parseM3U(raw);

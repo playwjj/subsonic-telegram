@@ -30,7 +30,7 @@ export default {
     const params = url.searchParams;
     const format = params.get("f");
 
-    const auth = await authenticate(env.DB, params);
+    const auth = await authenticate(env, params);
     if (!auth.ok) return respond(subsonicError(auth.code, auth.message), format);
 
     if (endpoint === "ping") {

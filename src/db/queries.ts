@@ -153,14 +153,6 @@ export async function search3(
   return { artists: artists.results, albums: albums.results, songs: songs.results };
 }
 
-export async function getUserPassword(db: D1Database, username: string): Promise<string | null> {
-  const row = await db
-    .prepare(`SELECT password FROM users WHERE username = ?`)
-    .bind(username)
-    .first<{ password: string }>();
-  return row?.password ?? null;
-}
-
 export async function getTrackBySourcePath(db: D1Database, sourcePath: string): Promise<TrackRow | null> {
   const row = await db.prepare(`${TRACK_SELECT} WHERE t.source_path = ?`).bind(sourcePath).first<TrackRow>();
   return row ?? null;

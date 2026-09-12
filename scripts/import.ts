@@ -107,17 +107,33 @@ async function d1<T = any>(sql: string, params: unknown[] = []): Promise<T[]> {
   return data.result[0]?.results ?? [];
 }
 
+const UPLOAD_RETRIES = 3;
+const UPLOAD_RETRY_DELAY_MS = 2000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function telegramSendDocument(bytes: Uint8Array, filename: string, mimeType: string) {
-  const form = new FormData();
-  form.set("chat_id", TG_CHANNEL_ID);
-  form.set("document", new Blob([bytes], { type: mimeType }), filename);
-  const res = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument`, {
-    method: "POST",
-    body: form,
-  });
-  const data = (await res.json()) as any;
-  if (!data.ok) throw new Error(`Telegram upload failed for ${filename}: ${JSON.stringify(data)}`);
-  return data.result;
+  for (let attempt = 1; attempt <= UPLOAD_RETRIES; attempt++) {
+    try {
+      const form = new FormData();
+      form.set("chat_id", TG_CHANNEL_ID);
+      form.set("document", new Blob([bytes], { type: mimeType }), filename);
+      const res = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument`, {
+        method: "POST",
+        body: form,
+      });
+      const data = (await res.json()) as any;
+      if (!data.ok) throw new Error(`Telegram upload failed for ${filename}: ${JSON.stringify(data)}`);
+      return data.result;
+    } catch (err) {
+      if (attempt === UPLOAD_RETRIES) throw err;
+      console.warn(`Upload attempt ${attempt}/${UPLOAD_RETRIES} failed for ${filename}, retrying: ${err}`);
+      await sleep(UPLOAD_RETRY_DELAY_MS * attempt);
+    }
+  }
+  throw new Error("unreachable");
 }
 
 async function ensureArtist(name: string): Promise<string> {
