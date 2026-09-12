@@ -26,7 +26,7 @@ function playFrom(index: number) {
 
 <template>
   <div v-if="album" class="album-detail">
-    <div class="header">
+    <div class="header glass mb-6 p-4">
       <img v-if="album.coverArt" class="cover" :src="coverArtUrl(album.coverArt)" :alt="album.name" />
       <div class="info">
         <h1>{{ album.name }}</h1>
@@ -35,7 +35,7 @@ function playFrom(index: number) {
         <button @click="playFrom(0)">▶ Play album</button>
       </div>
     </div>
-    <div class="tracks">
+    <div class="tracks glass p-2">
       <TrackRow v-for="(song, i) in album.song" :key="song.id" :song="song" @play="playFrom(i)" />
     </div>
   </div>

@@ -62,12 +62,14 @@ async function removePlaylist() {
       </div>
     </div>
     <p v-if="!playlist.entry.length">No songs yet — add some from the album/search views.</p>
-    <div v-for="(song, i) in playlist.entry" :key="`${song.id}-${i}`" class="row">
-      <TrackRow :song="song" @play="playFrom(i)" />
-      <div class="reorder">
-        <button :disabled="i === 0" @click="move(i, -1)">↑</button>
-        <button :disabled="i === playlist.entry.length - 1" @click="move(i, 1)">↓</button>
-        <button @click="removeAt(i)">✕</button>
+    <div v-else class="glass p-2">
+      <div v-for="(song, i) in playlist.entry" :key="`${song.id}-${i}`" class="row">
+        <TrackRow :song="song" @play="playFrom(i)" />
+        <div class="reorder">
+          <button :disabled="i === 0" @click="move(i, -1)">↑</button>
+          <button :disabled="i === playlist.entry.length - 1" @click="move(i, 1)">↓</button>
+          <button @click="removeAt(i)">✕</button>
+        </div>
       </div>
     </div>
   </div>

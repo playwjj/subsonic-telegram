@@ -15,7 +15,7 @@ function formatTime(sec: number): string {
 </script>
 
 <template>
-  <div v-if="currentTrack" class="player-bar">
+  <div v-if="currentTrack" class="player-bar glass">
     <img v-if="currentTrack.coverArt" class="cover" :src="coverArtUrl(currentTrack.coverArt)" alt="" />
     <div class="meta">
       <div class="title">{{ currentTrack.title }}</div>
@@ -42,15 +42,13 @@ function formatTime(sec: number): string {
 <style scoped>
 .player-bar {
   position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: 0.75rem;
   display: flex;
   align-items: center;
   gap: 0.75rem;
   padding: 0.6rem 1rem;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
   z-index: 20;
 }
 .cover {

@@ -6,6 +6,15 @@ import PlayerBar from "./components/PlayerBar.vue";
 const route = useRoute();
 const router = useRouter();
 
+const navLinks = [
+  { to: "/", label: "Home" },
+  { to: "/artists", label: "Artists" },
+  { to: "/songs", label: "Songs" },
+  { to: "/folders", label: "Folders" },
+  { to: "/search", label: "Search" },
+  { to: "/playlists", label: "Playlists" },
+];
+
 async function handleLogout() {
   logout();
   await router.push({ name: "login" });
@@ -13,55 +22,35 @@ async function handleLogout() {
 </script>
 
 <template>
-  <div class="app">
-    <nav v-if="isLoggedIn() && route.name !== 'login'" class="nav">
-      <RouterLink to="/">Library</RouterLink>
-      <RouterLink to="/search">Search</RouterLink>
-      <RouterLink to="/playlists">Playlists</RouterLink>
-      <button class="logout" @click="handleLogout">Logout</button>
+  <div>
+    <!-- Fixed aurora background: soft blurred gradient blobs behind everything. -->
+    <div aria-hidden="true" class="fixed inset-0 -z-10 overflow-hidden bg-[var(--bg)]">
+      <div class="absolute -top-40 -left-32 h-[34rem] w-[34rem] rounded-full bg-teal-500/20 blur-[110px]"></div>
+      <div class="absolute top-1/4 -right-40 h-[38rem] w-[38rem] rounded-full bg-violet-500/20 blur-[120px]"></div>
+      <div class="absolute bottom-[-10rem] left-1/4 h-[30rem] w-[30rem] rounded-full bg-pink-500/10 blur-[110px]"></div>
+    </div>
+
+    <nav
+      v-if="isLoggedIn() && route.name !== 'login'"
+      class="glass sticky top-0 z-20 mx-3 mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl px-4 py-3 sm:mx-4"
+    >
+      <RouterLink
+        v-for="link in navLinks"
+        :key="link.to"
+        :to="link.to"
+        class="text-sm text-[var(--text-dim)] transition-colors hover:text-[var(--text)] [&.router-link-exact-active]:font-semibold [&.router-link-exact-active]:text-[var(--text)]"
+      >
+        {{ link.label }}
+      </RouterLink>
+      <button class="ml-auto border-none bg-transparent p-0 text-sm text-[var(--text-dim)] hover:bg-transparent hover:text-[var(--text)]" @click="handleLogout">
+        Logout
+      </button>
     </nav>
-    <main class="content" :class="{ 'with-player': isLoggedIn() }">
+
+    <main class="mx-auto max-w-5xl px-4 py-5" :class="{ 'pb-24': isLoggedIn() }">
       <RouterView />
     </main>
+
     <PlayerBar v-if="isLoggedIn() && route.name !== 'login'" />
   </div>
 </template>
-
-<style scoped>
-.nav {
-  display: flex;
-  align-items: center;
-  gap: 1.25rem;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
-  background: var(--bg);
-  z-index: 15;
-}
-.nav a {
-  color: inherit;
-  text-decoration: none;
-  opacity: 0.7;
-}
-.nav a.router-link-active {
-  opacity: 1;
-  font-weight: 600;
-}
-.logout {
-  margin-left: auto;
-  background: none;
-  border: none;
-  color: inherit;
-  opacity: 0.7;
-  cursor: pointer;
-}
-.content {
-  max-width: 60rem;
-  margin: 0 auto;
-  padding: 1.25rem 1rem;
-}
-.content.with-player {
-  padding-bottom: 5rem;
-}
-</style>

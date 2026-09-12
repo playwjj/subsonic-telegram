@@ -31,7 +31,7 @@ async function create() {
     </form>
     <p v-if="loading">Loading…</p>
     <p v-else-if="!playlists.length">No playlists yet.</p>
-    <ul>
+    <ul v-else class="glass p-2">
       <li v-for="p in playlists" :key="p.id">
         <RouterLink :to="{ name: 'playlist', params: { id: p.id } }">{{ p.name }}</RouterLink>
         <span class="count">{{ p.songCount }} 首</span>

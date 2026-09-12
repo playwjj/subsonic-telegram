@@ -152,6 +152,11 @@ export async function getAlbum(id: string): Promise<AlbumDetail> {
   return body.album;
 }
 
+export async function getAlbumList2(opts: { type: string; size: number }): Promise<Album[]> {
+  const body = await call<{ albumList2: { album: Album[] } }>("getAlbumList2", opts);
+  return body.albumList2.album;
+}
+
 export async function search3(query: string): Promise<{ artist: Artist[]; album: Album[]; song: Song[] }> {
   const body = await call<{ searchResult3: { artist: Artist[]; album: Album[]; song: Song[] } }>("search3", {
     query,
@@ -198,4 +203,60 @@ export async function updatePlaylist(opts: {
 
 export async function deletePlaylist(id: string): Promise<void> {
   await call("deletePlaylist", { id });
+}
+
+// --- Home/Songs/Folders — these are custom endpoints this project's own
+// Worker exposes for this web UI, not part of the official Subsonic spec.
+
+export interface LibraryStats {
+  artistCount: number;
+  albumCount: number;
+  songCount: number;
+  totalDuration: number;
+}
+
+export async function getLibraryStats(): Promise<LibraryStats> {
+  const body = await call<{ libraryStats: LibraryStats }>("getLibraryStats");
+  return body.libraryStats;
+}
+
+export type SongSort = "title" | "artist" | "recent" | "mostPlayed";
+
+export async function getSongs(opts: { size: number; offset: number; sort: SongSort }): Promise<{
+  songs: Song[];
+  total: number;
+}> {
+  const body = await call<{ songs: { total: number; song: Song[] } }>("getSongs", {
+    size: opts.size,
+    offset: opts.offset,
+    sort: opts.sort,
+  });
+  return { songs: body.songs.song, total: body.songs.total };
+}
+
+export async function getRecentlyPlayed(size: number): Promise<Song[]> {
+  const body = await call<{ recentlyPlayed: { song: Song[] } }>("getRecentlyPlayed", { size });
+  return body.recentlyPlayed.song;
+}
+
+export async function getMostPlayed(size: number): Promise<Song[]> {
+  const body = await call<{ mostPlayed: { song: Song[] } }>("getMostPlayed", { size });
+  return body.mostPlayed.song;
+}
+
+export interface FolderListing {
+  path: string;
+  dirs: string[];
+  songs: Song[];
+}
+
+export async function getFolder(path: string): Promise<FolderListing> {
+  const body = await call<{ folder: { path: string; dir?: { name: string }[]; song?: Song[] } }>("getFolder", {
+    path,
+  });
+  return {
+    path: body.folder.path,
+    dirs: (body.folder.dir ?? []).map((d) => d.name),
+    songs: body.folder.song ?? [],
+  };
 }
