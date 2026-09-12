@@ -11,7 +11,10 @@
 // document. Since TGFS and this project use the *same* bot and the *same*
 // channel, we can call Telegram's forwardMessage on those message ids to
 // obtain a document/file_id this project's bot can stream directly via
-// getFile — no bytes ever pass through this script.
+// getFile — no audio bytes ever pass through this script. Embedded album
+// cover art is the one exception: it's read from the local music copy (via
+// LOCAL_MUSIC_DIR) and uploaded fresh, same as scripts/import.ts does,
+// since TGFS's metadata doesn't carry a separate message for it.
 //
 // Already-synced tracks are tracked in a local state file (.sync-tgfs-state.json,
 // keyed by their path in the TGFS metadata repo) and skipped without touching
@@ -229,6 +232,7 @@ interface LocalTags {
   duration?: number;
   bitrate?: number;
   size?: number;
+  picture?: { data: Uint8Array; format: string };
 }
 
 async function readLocalTags(localPath: string | null): Promise<LocalTags> {
@@ -247,11 +251,44 @@ async function readLocalTags(localPath: string | null): Promise<LocalTags> {
       duration: meta.format.duration ? Math.round(meta.format.duration) : undefined,
       bitrate: meta.format.bitrate ? Math.round(meta.format.bitrate / 1000) : undefined,
       size: statSync(localPath).size,
+      picture: common.picture?.[0] ? { data: common.picture[0].data, format: common.picture[0].format } : undefined,
     };
   } catch (e) {
     console.warn(`    (tag read failed for ${localPath}: ${e})`);
     return {};
   }
+}
+
+async function tgSendDocument(bytes: Uint8Array, filename: string, mimeType: string, retries = 5): Promise<any> {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const form = new FormData();
+    form.set("chat_id", TG_CHANNEL_ID);
+    form.set("document", new Blob([bytes], { type: mimeType }), filename);
+    const res = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument`, {
+      method: "POST",
+      body: form,
+    });
+    const data = (await res.json()) as any;
+    if (data.ok) return data.result;
+    if (res.status === 429 && data.parameters?.retry_after) {
+      const wait = data.parameters.retry_after + 1;
+      console.log(`  rate limited, sleeping ${wait}s`);
+      await new Promise((r) => setTimeout(r, wait * 1000));
+      continue;
+    }
+    throw new Error(`Telegram sendDocument failed: ${JSON.stringify(data)}`);
+  }
+  throw new Error(`Telegram sendDocument failed after ${retries} retries`);
+}
+
+async function ensureCoverArt(albumId: string, picture: { data: Uint8Array; format: string }): Promise<void> {
+  const existing = await d1<{ cover_ref: string | null }>("SELECT cover_ref FROM albums WHERE id = ?", [albumId]);
+  if (existing[0]?.cover_ref) return;
+  const message = await tgSendDocument(picture.data, `cover-${albumId}.jpg`, picture.format);
+  const fileId = message.document?.file_id;
+  if (!fileId) return;
+  const ref = JSON.stringify({ messageId: message.message_id, fileId });
+  await d1("UPDATE albums SET cover_ref = ? WHERE id = ?", [ref, albumId]);
 }
 
 interface ResolvedFile {
@@ -343,34 +380,56 @@ async function main() {
 
   if (process.argv.includes("--backfill-state")) {
     // One-off recovery: match tracks against what's already in D1 (by the
-    // same deterministic id scheme) and mark them done locally, without any
-    // Telegram calls. Use this once if the state file is new/lost but D1
-    // already has rows from a previous run.
-    console.log("Backfilling local state from D1 (also fills in source_path for scripts/import-m3u.ts)...");
+    // same deterministic id scheme) and mark them done locally — plus fill in
+    // source_path and any missing cover art, since those were added to this
+    // script after some tracks were already synced. This does one Telegram
+    // upload per album missing cover art (small image bytes, not audio); no
+    // audio ever gets re-transferred. Use this once if the state file is
+    // new/lost but D1 already has rows from a previous run.
+    console.log("Backfilling local state from D1 (also fills in source_path and cover art)...");
     const existing = await d1<{ id: string; source_path: string | null }>("SELECT id, source_path FROM tracks");
     const existingById = new Map(existing.map((r) => [r.id, r]));
     let matched = 0;
     let sourcePathsFilled = 0;
+    let coversFilled = 0;
     for (const t of tracks) {
-      if (done.has(t.relPath)) continue;
-      const tags = await readLocalTags(t.localPath);
-      const artistId = md5(`artist:${(tags.artist ?? t.artist).toLowerCase()}`);
-      const albumId = md5(`album:${artistId}:${(tags.album ?? t.album).toLowerCase()}`);
-      const trackId = md5(`track:${albumId}:${t.filename}`);
-      const row = existingById.get(trackId);
-      if (row) {
-        done.add(t.relPath);
-        matched++;
-        if (!row.source_path && t.localPath) {
-          const sourcePath = t.relPath.replace(/\.\d+$/, "");
-          await d1("UPDATE tracks SET source_path = ? WHERE id = ?", [sourcePath, trackId]);
-          sourcePathsFilled++;
+      // Deliberately not gated on done.has(t.relPath): this also needs to
+      // backfill cover art for tracks a prior --backfill-state run already
+      // marked done (cover art support was added after that), so it always
+      // re-checks every track. Each check is cheap and a no-op once filled.
+      try {
+        const tags = await readLocalTags(t.localPath);
+        const artistId = md5(`artist:${(tags.artist ?? t.artist).toLowerCase()}`);
+        const albumId = md5(`album:${artistId}:${(tags.album ?? t.album).toLowerCase()}`);
+        const trackId = md5(`track:${albumId}:${t.filename}`);
+        const row = existingById.get(trackId);
+        if (row) {
+          done.add(t.relPath);
+          matched++;
+          if (!row.source_path && t.localPath) {
+            const sourcePath = t.relPath.replace(/\.\d+$/, "");
+            await d1("UPDATE tracks SET source_path = ? WHERE id = ?", [sourcePath, trackId]);
+            sourcePathsFilled++;
+          }
+          if (tags.picture) {
+            const existingCover = await d1<{ cover_ref: string | null }>(
+              "SELECT cover_ref FROM albums WHERE id = ?",
+              [albumId],
+            );
+            if (!existingCover[0]?.cover_ref) {
+              await ensureCoverArt(albumId, tags.picture);
+              coversFilled++;
+              await new Promise((r) => setTimeout(r, 300));
+            }
+          }
         }
+      } catch (e) {
+        console.error(`  Failed on ${t.relPath}: ${e}`);
       }
     }
     saveState(done);
     console.log(
-      `Matched ${matched} tracks already in D1 (filled in source_path for ${sourcePathsFilled}). State file now has ${done.size} entries.`,
+      `Matched ${matched} tracks already in D1 (filled in source_path for ${sourcePathsFilled}, cover art for ${coversFilled} albums). State file now has ${done.size} entries.`,
     );
     return;
   }
@@ -406,6 +465,7 @@ async function main() {
 
       const artistId = await ensureArtist(artistCache, artistName);
       const albumId = await ensureAlbum(albumCache, albumName, artistId, year, tags.genre ?? null);
+      if (tags.picture && !DRY_RUN) await ensureCoverArt(albumId, tags.picture);
       const trackId = md5(`track:${albumId}:${t.filename}`);
       const mime = AUDIO_MIME[t.ext] ?? "application/octet-stream";
       const fileRef = JSON.stringify({ messageId: result.forwardedMessageId, fileId: result.fileId });
