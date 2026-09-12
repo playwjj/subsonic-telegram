@@ -1,5 +1,5 @@
 import { node, type SNode } from "./node";
-import type { ArtistRow, AlbumRow, TrackRow } from "../db/queries";
+import type { ArtistRow, AlbumRow, TrackRow, PlaylistRow } from "../db/queries";
 
 function isoDate(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toISOString();
@@ -50,4 +50,25 @@ export function songNode(t: TrackRow): SNode {
     artistId: t.artist_id,
     type: "music",
   });
+}
+
+// Playlist entries use the same fields as a song, just under an <entry> tag.
+export function playlistEntryNode(t: TrackRow): SNode {
+  return { ...songNode(t), tag: "entry" };
+}
+
+export function playlistNode(p: PlaylistRow, opts?: { entries?: SNode[] }): SNode {
+  return node(
+    "playlist",
+    {
+      id: p.id,
+      name: p.name,
+      owner: p.owner,
+      songCount: p.song_count,
+      duration: p.duration,
+      created: isoDate(p.created_at),
+      changed: isoDate(p.changed_at),
+    },
+    opts?.entries ? { lists: { entry: opts.entries } } : undefined,
+  );
 }

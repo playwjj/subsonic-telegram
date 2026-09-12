@@ -157,3 +157,136 @@ export async function getUserPassword(db: D1Database, username: string): Promise
     .first<{ password: string }>();
   return row?.password ?? null;
 }
+
+export async function getTrackBySourcePath(db: D1Database, sourcePath: string): Promise<TrackRow | null> {
+  const row = await db.prepare(`${TRACK_SELECT} WHERE t.source_path = ?`).bind(sourcePath).first<TrackRow>();
+  return row ?? null;
+}
+
+export interface PlaylistRow {
+  id: string;
+  name: string;
+  owner: string;
+  created_at: number;
+  changed_at: number;
+  song_count: number;
+  duration: number;
+}
+
+const PLAYLIST_SELECT = `
+  SELECT p.id, p.name, p.owner, p.created_at, p.changed_at,
+         COUNT(pt.track_id) as song_count, COALESCE(SUM(t.duration), 0) as duration
+  FROM playlists p
+  LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+  LEFT JOIN tracks t ON t.id = pt.track_id
+`;
+
+export async function listPlaylists(db: D1Database): Promise<PlaylistRow[]> {
+  const { results } = await db
+    .prepare(`${PLAYLIST_SELECT} GROUP BY p.id ORDER BY p.name COLLATE NOCASE`)
+    .all<PlaylistRow>();
+  return results;
+}
+
+export async function getPlaylist(db: D1Database, id: string): Promise<PlaylistRow | null> {
+  const row = await db.prepare(`${PLAYLIST_SELECT} WHERE p.id = ? GROUP BY p.id`).bind(id).first<PlaylistRow>();
+  return row ?? null;
+}
+
+export async function listPlaylistTracks(db: D1Database, playlistId: string): Promise<TrackRow[]> {
+  const { results } = await db
+    .prepare(`${TRACK_SELECT} JOIN playlist_tracks pt ON pt.track_id = t.id WHERE pt.playlist_id = ? ORDER BY pt.position`)
+    .bind(playlistId)
+    .all<TrackRow>();
+  return results;
+}
+
+export async function createPlaylist(
+  db: D1Database,
+  id: string,
+  name: string,
+  owner: string,
+  trackIds: string[],
+): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  await db.batch([
+    db
+      .prepare(`INSERT INTO playlists (id, name, owner, created_at, changed_at) VALUES (?, ?, ?, ?, ?)`)
+      .bind(id, name, owner, now, now),
+    ...trackIds.map((tid, i) =>
+      db
+        .prepare(`INSERT INTO playlist_tracks (playlist_id, position, track_id) VALUES (?, ?, ?)`)
+        .bind(id, i, tid),
+    ),
+  ]);
+}
+
+export async function deletePlaylist(db: D1Database, id: string): Promise<void> {
+  await db.batch([
+    db.prepare(`DELETE FROM playlist_tracks WHERE playlist_id = ?`).bind(id),
+    db.prepare(`DELETE FROM playlists WHERE id = ?`).bind(id),
+  ]);
+}
+
+export async function renamePlaylist(db: D1Database, id: string, name: string): Promise<void> {
+  await db
+    .prepare(`UPDATE playlists SET name = ?, changed_at = ? WHERE id = ?`)
+    .bind(name, Math.floor(Date.now() / 1000), id)
+    .run();
+}
+
+export async function replacePlaylistTracks(db: D1Database, playlistId: string, trackIds: string[]): Promise<void> {
+  await db.batch([
+    db.prepare(`DELETE FROM playlist_tracks WHERE playlist_id = ?`).bind(playlistId),
+    ...trackIds.map((tid, i) =>
+      db
+        .prepare(`INSERT INTO playlist_tracks (playlist_id, position, track_id) VALUES (?, ?, ?)`)
+        .bind(playlistId, i, tid),
+    ),
+    db
+      .prepare(`UPDATE playlists SET changed_at = ? WHERE id = ?`)
+      .bind(Math.floor(Date.now() / 1000), playlistId),
+  ]);
+}
+
+export async function addTracksToPlaylist(db: D1Database, playlistId: string, trackIds: string[]): Promise<void> {
+  const row = await db
+    .prepare(`SELECT COALESCE(MAX(position), -1) as maxPos FROM playlist_tracks WHERE playlist_id = ?`)
+    .bind(playlistId)
+    .first<{ maxPos: number }>();
+  let pos = (row?.maxPos ?? -1) + 1;
+  await db.batch([
+    ...trackIds.map((tid) =>
+      db
+        .prepare(`INSERT INTO playlist_tracks (playlist_id, position, track_id) VALUES (?, ?, ?)`)
+        .bind(playlistId, pos++, tid),
+    ),
+    db
+      .prepare(`UPDATE playlists SET changed_at = ? WHERE id = ?`)
+      .bind(Math.floor(Date.now() / 1000), playlistId),
+  ]);
+}
+
+export async function removeTracksFromPlaylistByIndex(
+  db: D1Database,
+  playlistId: string,
+  indexes: number[],
+): Promise<void> {
+  const { results } = await db
+    .prepare(`SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position`)
+    .bind(playlistId)
+    .all<{ track_id: string }>();
+  const removeSet = new Set(indexes);
+  const kept = results.filter((_, i) => !removeSet.has(i)).map((r) => r.track_id);
+  await db.batch([
+    db.prepare(`DELETE FROM playlist_tracks WHERE playlist_id = ?`).bind(playlistId),
+    ...kept.map((tid, i) =>
+      db
+        .prepare(`INSERT INTO playlist_tracks (playlist_id, position, track_id) VALUES (?, ?, ?)`)
+        .bind(playlistId, i, tid),
+    ),
+    db
+      .prepare(`UPDATE playlists SET changed_at = ? WHERE id = ?`)
+      .bind(Math.floor(Date.now() / 1000), playlistId),
+  ]);
+}

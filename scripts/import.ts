@@ -170,10 +170,11 @@ async function main() {
       if (!fileId) throw new Error("Telegram response missing file_id");
 
       const trackId = md5(`track:${albumId}:${path.basename(file)}`);
+      const sourcePath = path.relative(MUSIC_DIR, file).split(path.sep).join("/");
       await d1(
         `INSERT INTO tracks
-           (id, album_id, artist_id, title, track_no, disc_no, duration, suffix, content_type, size, bitrate, file_ref, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           (id, album_id, artist_id, title, track_no, disc_no, duration, suffix, content_type, size, bitrate, file_ref, created_at, source_path)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO NOTHING`,
         [
           trackId,
@@ -189,6 +190,7 @@ async function main() {
           meta.format.bitrate ? Math.round(meta.format.bitrate / 1000) : null,
           JSON.stringify({ messageId: message.message_id, fileId }),
           Math.floor(Date.now() / 1000),
+          sourcePath,
         ],
       );
 

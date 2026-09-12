@@ -31,11 +31,30 @@ CREATE TABLE IF NOT EXISTS tracks (
   size         INTEGER NOT NULL,
   bitrate      INTEGER,
   file_ref     TEXT NOT NULL,  -- JSON: {"messageId":123,"fileId":"..."}
-  created_at   INTEGER NOT NULL
+  created_at   INTEGER NOT NULL,
+  source_path  TEXT             -- path relative to the local music dir at import time, if known;
+                                 -- lets scripts/import-m3u.ts match .m3u entries to a track
 );
 CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album_id);
 CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist_id);
 CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks(title);
+CREATE INDEX IF NOT EXISTS idx_tracks_source_path ON tracks(source_path);
+
+CREATE TABLE IF NOT EXISTS playlists (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  owner      TEXT NOT NULL REFERENCES users(username),
+  created_at INTEGER NOT NULL,
+  changed_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS playlist_tracks (
+  playlist_id TEXT NOT NULL REFERENCES playlists(id),
+  position    INTEGER NOT NULL,
+  track_id    TEXT NOT NULL REFERENCES tracks(id),
+  PRIMARY KEY (playlist_id, position)
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist ON playlist_tracks(playlist_id);
 
 -- Subsonic legacy token auth (t = md5(password + salt)) needs the plaintext
 -- password server-side to recompute the hash, so it's stored as-is here.

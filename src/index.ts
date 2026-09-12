@@ -2,7 +2,7 @@ import type { Env } from "./types";
 import { authenticate } from "./auth";
 import { respond, subsonicError, subsonicSuccess } from "./subsonic/response";
 import { node } from "./subsonic/node";
-import { artistNode, albumNode, songNode } from "./subsonic/mappers";
+import { artistNode, albumNode, songNode, playlistNode, playlistEntryNode } from "./subsonic/mappers";
 import * as browsing from "./subsonic/browsing";
 import * as media from "./subsonic/media";
 import * as q from "./db/queries";
@@ -117,6 +117,69 @@ export default {
         const id = params.get("id");
         if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
         return media.getCoverArt(env.DB, storage, id);
+      }
+
+      case "getPlaylists": {
+        const playlists = await q.listPlaylists(env.DB);
+        return respond(
+          subsonicSuccess(node("playlists", undefined, { lists: { playlist: playlists.map((p) => playlistNode(p)) } })),
+          format,
+        );
+      }
+
+      case "getPlaylist": {
+        const id = params.get("id");
+        if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
+        const playlist = await q.getPlaylist(env.DB, id);
+        if (!playlist) return respond(subsonicError(ERR.NOT_FOUND, "Playlist not found"), format);
+        const tracks = await q.listPlaylistTracks(env.DB, id);
+        return respond(subsonicSuccess(playlistNode(playlist, { entries: tracks.map(playlistEntryNode) })), format);
+      }
+
+      case "createPlaylist": {
+        const playlistIdParam = params.get("playlistId");
+        const name = params.get("name");
+        const songIds = params.getAll("songId");
+        let id: string;
+        if (playlistIdParam) {
+          const existing = await q.getPlaylist(env.DB, playlistIdParam);
+          if (!existing) return respond(subsonicError(ERR.NOT_FOUND, "Playlist not found"), format);
+          await q.replacePlaylistTracks(env.DB, playlistIdParam, songIds);
+          if (name) await q.renamePlaylist(env.DB, playlistIdParam, name);
+          id = playlistIdParam;
+        } else {
+          if (!name) return respond(subsonicError(ERR.MISSING_PARAM, "Missing name"), format);
+          id = crypto.randomUUID();
+          await q.createPlaylist(env.DB, id, name, auth.username, songIds);
+        }
+        const playlist = (await q.getPlaylist(env.DB, id))!;
+        const tracks = await q.listPlaylistTracks(env.DB, id);
+        return respond(subsonicSuccess(playlistNode(playlist, { entries: tracks.map(playlistEntryNode) })), format);
+      }
+
+      case "updatePlaylist": {
+        const id = params.get("playlistId");
+        if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing playlistId"), format);
+        const existing = await q.getPlaylist(env.DB, id);
+        if (!existing) return respond(subsonicError(ERR.NOT_FOUND, "Playlist not found"), format);
+
+        const name = params.get("name");
+        if (name) await q.renamePlaylist(env.DB, id, name);
+
+        const removeIdx = params.getAll("songIndexToRemove").map(Number);
+        if (removeIdx.length) await q.removeTracksFromPlaylistByIndex(env.DB, id, removeIdx);
+
+        const addIds = params.getAll("songIdToAdd");
+        if (addIds.length) await q.addTracksToPlaylist(env.DB, id, addIds);
+
+        return respond(subsonicSuccess(), format);
+      }
+
+      case "deletePlaylist": {
+        const id = params.get("id");
+        if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
+        await q.deletePlaylist(env.DB, id);
+        return respond(subsonicSuccess(), format);
       }
 
       default:

@@ -346,23 +346,32 @@ async function main() {
     // same deterministic id scheme) and mark them done locally, without any
     // Telegram calls. Use this once if the state file is new/lost but D1
     // already has rows from a previous run.
-    console.log("Backfilling local state from D1 (one bulk query, no Telegram calls)...");
-    const existing = await d1<{ id: string }>("SELECT id FROM tracks");
-    const existingIds = new Set(existing.map((r) => r.id));
+    console.log("Backfilling local state from D1 (also fills in source_path for scripts/import-m3u.ts)...");
+    const existing = await d1<{ id: string; source_path: string | null }>("SELECT id, source_path FROM tracks");
+    const existingById = new Map(existing.map((r) => [r.id, r]));
     let matched = 0;
+    let sourcePathsFilled = 0;
     for (const t of tracks) {
       if (done.has(t.relPath)) continue;
       const tags = await readLocalTags(t.localPath);
       const artistId = md5(`artist:${(tags.artist ?? t.artist).toLowerCase()}`);
       const albumId = md5(`album:${artistId}:${(tags.album ?? t.album).toLowerCase()}`);
       const trackId = md5(`track:${albumId}:${t.filename}`);
-      if (existingIds.has(trackId)) {
+      const row = existingById.get(trackId);
+      if (row) {
         done.add(t.relPath);
         matched++;
+        if (!row.source_path && t.localPath) {
+          const sourcePath = t.relPath.replace(/\.\d+$/, "");
+          await d1("UPDATE tracks SET source_path = ? WHERE id = ?", [sourcePath, trackId]);
+          sourcePathsFilled++;
+        }
       }
     }
     saveState(done);
-    console.log(`Matched ${matched} tracks already in D1. State file now has ${done.size} entries.`);
+    console.log(
+      `Matched ${matched} tracks already in D1 (filled in source_path for ${sourcePathsFilled}). State file now has ${done.size} entries.`,
+    );
     return;
   }
 
@@ -401,16 +410,18 @@ async function main() {
       const mime = AUDIO_MIME[t.ext] ?? "application/octet-stream";
       const fileRef = JSON.stringify({ messageId: result.forwardedMessageId, fileId: result.fileId });
       const size = tags.size ?? result.fileSize;
+      // Same relative path a local import would have used, for scripts/import-m3u.ts to match against.
+      const sourcePath = t.localPath ? t.relPath.replace(/\.\d+$/, "") : null;
 
       if (!DRY_RUN) {
         await d1(
           `INSERT INTO tracks
-             (id, album_id, artist_id, title, track_no, disc_no, duration, suffix, content_type, size, bitrate, file_ref, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             (id, album_id, artist_id, title, track_no, disc_no, duration, suffix, content_type, size, bitrate, file_ref, created_at, source_path)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              title=excluded.title, track_no=excluded.track_no, disc_no=excluded.disc_no,
              duration=excluded.duration, size=excluded.size, bitrate=excluded.bitrate,
-             file_ref=excluded.file_ref`,
+             file_ref=excluded.file_ref, source_path=COALESCE(excluded.source_path, tracks.source_path)`,
           [
             trackId,
             albumId,
@@ -425,6 +436,7 @@ async function main() {
             tags.bitrate ?? null,
             fileRef,
             Math.floor(Date.now() / 1000),
+            sourcePath,
           ],
         );
       }
