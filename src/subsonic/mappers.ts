@@ -48,6 +48,8 @@ export function songNode(t: TrackRow): SNode {
     coverArt: t.album_id,
     albumId: t.album_id,
     artistId: t.artist_id,
+    playCount: t.play_count || undefined,
+    played: t.last_played ? isoDate(t.last_played) : undefined,
     type: "music",
   });
 }

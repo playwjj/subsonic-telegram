@@ -182,6 +182,69 @@ export default {
         return respond(subsonicSuccess(), format);
       }
 
+      case "getRandomSongs": {
+        const size = Math.min(Number(params.get("size") ?? 10), 500);
+        const genre = params.get("genre") ?? undefined;
+        const fromYearParam = params.get("fromYear");
+        const toYearParam = params.get("toYear");
+        const tracks = await q.getRandomSongs(env.DB, {
+          size,
+          genre,
+          fromYear: fromYearParam ? Number(fromYearParam) : undefined,
+          toYear: toYearParam ? Number(toYearParam) : undefined,
+        });
+        return respond(subsonicSuccess(node("randomSongs", undefined, { lists: { song: tracks.map(songNode) } })), format);
+      }
+
+      case "scrobble": {
+        const ids = params.getAll("id");
+        if (!ids.length) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
+        // Per spec, submission defaults to true; only a real ("submission")
+        // scrobble updates play stats — a "now playing" notification
+        // (submission=false) is a no-op here, we don't track that.
+        const submission = params.get("submission");
+        if (submission !== "false") {
+          const times = params.getAll("time");
+          for (let i = 0; i < ids.length; i++) {
+            const timeMs = Number(times[i]);
+            const playedAt = Number.isFinite(timeMs) && times[i] ? Math.floor(timeMs / 1000) : Math.floor(Date.now() / 1000);
+            await q.scrobble(env.DB, ids[i], playedAt);
+          }
+        }
+        return respond(subsonicSuccess(), format);
+      }
+
+      case "star":
+      case "unstar": {
+        const fn = endpoint === "star" ? q.starItem : q.unstarItem;
+        for (const id of params.getAll("id")) await fn(env.DB, auth.username, "track", id);
+        for (const id of params.getAll("albumId")) await fn(env.DB, auth.username, "album", id);
+        for (const id of params.getAll("artistId")) await fn(env.DB, auth.username, "artist", id);
+        return respond(subsonicSuccess(), format);
+      }
+
+      case "getStarred":
+      case "getStarred2": {
+        const tag = endpoint === "getStarred" ? "starred" : "starred2";
+        const [artists, albums, tracks] = await Promise.all([
+          q.getStarredArtists(env.DB, auth.username),
+          q.getStarredAlbums(env.DB, auth.username),
+          q.getStarredTracks(env.DB, auth.username),
+        ]);
+        return respond(
+          subsonicSuccess(
+            node(tag, undefined, {
+              lists: {
+                artist: artists.map((a) => artistNode(a)),
+                album: albums.map((a) => albumNode(a)),
+                song: tracks.map(songNode),
+              },
+            }),
+          ),
+          format,
+        );
+      }
+
       default:
         return respond(subsonicError(0, `Unsupported endpoint: ${endpoint}`), format);
     }

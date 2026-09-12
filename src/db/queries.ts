@@ -36,6 +36,8 @@ export interface TrackRow {
   created_at: number;
   year: number | null;
   genre: string | null;
+  play_count: number;
+  last_played: number | null;
 }
 
 const ARTIST_SELECT = `
@@ -289,4 +291,104 @@ export async function removeTracksFromPlaylistByIndex(
       .prepare(`UPDATE playlists SET changed_at = ? WHERE id = ?`)
       .bind(Math.floor(Date.now() / 1000), playlistId),
   ]);
+}
+
+export interface RandomSongsOptions {
+  size: number;
+  genre?: string;
+  fromYear?: number;
+  toYear?: number;
+}
+
+export async function getRandomSongs(db: D1Database, opts: RandomSongsOptions): Promise<TrackRow[]> {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (opts.genre !== undefined) {
+    conditions.push("al.genre = ?");
+    params.push(opts.genre);
+  }
+  if (opts.fromYear !== undefined) {
+    conditions.push("al.year >= ?");
+    params.push(opts.fromYear);
+  }
+  if (opts.toYear !== undefined) {
+    conditions.push("al.year <= ?");
+    params.push(opts.toYear);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  params.push(opts.size);
+  const { results } = await db
+    .prepare(`${TRACK_SELECT} ${where} ORDER BY RANDOM() LIMIT ?`)
+    .bind(...params)
+    .all<TrackRow>();
+  return results;
+}
+
+export async function scrobble(db: D1Database, trackId: string, playedAt: number): Promise<void> {
+  await db
+    .prepare(`UPDATE tracks SET play_count = play_count + 1, last_played = ? WHERE id = ?`)
+    .bind(playedAt, trackId)
+    .run();
+}
+
+export type StarredItemType = "artist" | "album" | "track";
+
+export async function starItem(
+  db: D1Database,
+  owner: string,
+  itemType: StarredItemType,
+  itemId: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO starred (owner, item_type, item_id, starred_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(owner, item_type, item_id) DO NOTHING`,
+    )
+    .bind(owner, itemType, itemId, Math.floor(Date.now() / 1000))
+    .run();
+}
+
+export async function unstarItem(
+  db: D1Database,
+  owner: string,
+  itemType: StarredItemType,
+  itemId: string,
+): Promise<void> {
+  await db
+    .prepare(`DELETE FROM starred WHERE owner = ? AND item_type = ? AND item_id = ?`)
+    .bind(owner, itemType, itemId)
+    .run();
+}
+
+export async function getStarredArtists(db: D1Database, owner: string): Promise<ArtistRow[]> {
+  const { results } = await db
+    .prepare(
+      `${ARTIST_SELECT} WHERE a.id IN (SELECT item_id FROM starred WHERE owner = ? AND item_type = 'artist')
+       GROUP BY a.id ORDER BY a.sort_name COLLATE NOCASE`,
+    )
+    .bind(owner)
+    .all<ArtistRow>();
+  return results;
+}
+
+export async function getStarredAlbums(db: D1Database, owner: string): Promise<AlbumRow[]> {
+  const { results } = await db
+    .prepare(
+      `${ALBUM_SELECT} WHERE al.id IN (SELECT item_id FROM starred WHERE owner = ? AND item_type = 'album')
+       GROUP BY al.id ORDER BY al.name COLLATE NOCASE`,
+    )
+    .bind(owner)
+    .all<AlbumRow>();
+  return results;
+}
+
+export async function getStarredTracks(db: D1Database, owner: string): Promise<TrackRow[]> {
+  const { results } = await db
+    .prepare(
+      `${TRACK_SELECT} WHERE t.id IN (SELECT item_id FROM starred WHERE owner = ? AND item_type = 'track')
+       ORDER BY t.title COLLATE NOCASE`,
+    )
+    .bind(owner)
+    .all<TrackRow>();
+  return results;
 }
