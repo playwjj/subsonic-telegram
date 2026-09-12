@@ -12,7 +12,6 @@
     "db:migrate:local": "wrangler d1 execute subsonic-telegram --local --file=./db/schema.sql",
     "db:migrate:remote": "wrangler d1 execute subsonic-telegram --remote --file=./db/schema.sql",
     "import": "tsx scripts/import.ts",
-    "sync-tgfs": "tsx scripts/sync-tgfs.ts",
     "import-m3u": "tsx scripts/import-m3u.ts"
   },
   "devDependencies": {

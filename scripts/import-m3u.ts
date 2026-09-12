@@ -1,8 +1,7 @@
 // Creates or updates a Subsonic playlist in D1 from a .m3u/.m3u8 file, by
 // matching each entry to an already-imported track via its `source_path`
-// column (set by scripts/import.ts and scripts/sync-tgfs.ts). Entries that
-// don't match a known track are reported and skipped — run `npm run import`
-// on that music first.
+// column (set by scripts/import.ts). Entries that don't match a known
+// track are reported and skipped — run `npm run import` on that music first.
 //
 // Both this script and `npm run import` must be pointed at the *same* music
 // root (LOCAL_MUSIC_DIR by default) for source_path to line up consistently.

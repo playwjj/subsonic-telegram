@@ -31,7 +31,6 @@ Telegram Bot API（sendDocument 上传 / getFile+文件CDN 下载，支持 Range
 | `src/storage/` | 存储后端接口 + Telegram 实现 |
 | `db/schema.sql` | D1 表结构 |
 | `scripts/import.ts` | 本地导入脚本：扫描本地音乐目录，读 tag，传 Telegram，写 D1 |
-| `scripts/sync-tgfs.ts` | 一次性/增量迁移脚本：把已经通过 [TGFS](https://github.com/TheodoreKrypton/tgfs)（同一个 Bot/频道）传过的历史存量导入 D1，不重新上传字节 |
 | `scripts/import-m3u.ts` | 从本地 `.m3u`/`.m3u8` 文件建/更新 Subsonic playlist |
 | `web/` | 自带的 Web UI（Vue 3 + Vite），打包后由 Workers Static Assets 跟 API 一起提供，见下面 [Web UI](#web-ui) |
 
@@ -67,7 +66,7 @@ Git 集成是从仓库里的 `wrangler.toml` 读配置的，占位符不改掉�
 wrangler d1 execute subsonic-telegram --remote --file=./db/schema.sql
 ```
 
-⚠️ **已知坑**：本机 `wrangler` 走的是环境变量里的 `CLOUDFLARE_API_TOKEN`（登录身份可能是别的项目/账号常用的那个），不一定跟这个 Worker 部署所在的 Cloudflare 账号是同一个——`wrangler whoami` 能看到的账号列表里如果没有目标账号，`wrangler secret put`/`wrangler d1 execute --remote`/`wrangler tail` 这些都会失败或连错账号，且这种失败往往不直观（认证错误、而不是明确提示"账号不对"）。踩到这个坑时的绕过办法：改用 Cloudflare 的 **D1 HTTP API**（`https://api.cloudflare.com/client/v4/accounts/<CF_ACCOUNT_ID>/d1/database/<D1_DATABASE_ID>/query`，带 `Authorization: Bearer <CF_API_TOKEN>`）直接跑 SQL，效果跟 `wrangler d1 execute --remote` 等价，且不依赖本机 wrangler 的登录身份——`scripts/import.ts`/`scripts/sync-tgfs.ts`/`scripts/import-m3u.ts` 全部走的这条路。Secrets（`TG_BOT_TOKEN`/`TG_CHANNEL_ID`）目前只能通过 Cloudflare Dashboard 手动设置来绕开这个问题（见下面第 5 步），HTTP API 没有对应的写入端点。
+⚠️ **已知坑**：本机 `wrangler` 走的是环境变量里的 `CLOUDFLARE_API_TOKEN`（登录身份可能是别的项目/账号常用的那个），不一定跟这个 Worker 部署所在的 Cloudflare 账号是同一个——`wrangler whoami` 能看到的账号列表里如果没有目标账号，`wrangler secret put`/`wrangler d1 execute --remote`/`wrangler tail` 这些都会失败或连错账号，且这种失败往往不直观（认证错误、而不是明确提示"账号不对"）。踩到这个坑时的绕过办法：改用 Cloudflare 的 **D1 HTTP API**（`https://api.cloudflare.com/client/v4/accounts/<CF_ACCOUNT_ID>/d1/database/<D1_DATABASE_ID>/query`，带 `Authorization: Bearer <CF_API_TOKEN>`）直接跑 SQL，效果跟 `wrangler d1 execute --remote` 等价，且不依赖本机 wrangler 的登录身份——`scripts/import.ts`/`scripts/import-m3u.ts` 全部走的这条路。Secrets（`TG_BOT_TOKEN`/`TG_CHANNEL_ID`）目前只能通过 Cloudflare Dashboard 手动设置来绕开这个问题（见下面第 5 步），HTTP API 没有对应的写入端点。
 
 **4. 建一个登录账号**（Subsonic 客户端登录用，明文密码存 D1，仅限个人单用户部署）
 
@@ -110,31 +109,6 @@ wrangler d1 execute subsonic-telegram --remote --command \
    会递归扫描目录下的 mp3/flac/m4a/ogg/opus/wav，读 tag（艺人/专辑/标题/年份/流派/封面），上传到 Telegram，写入 D1。超过 19MB 的文件会跳过并打印警告。
 3. 已经传过的文件记在本地 `.import-state.json`（不提交进 git），下次跑同一个目录会自动跳过，可以随时中断重跑。**去重只看本地这个文件，不查 D1**（有意的取舍——省 D1 读配额），代价是如果这个文件丢了/搬了机器，重跑会把同一批文件重新传一遍 Telegram（D1 那边不会出现重复记录，因为 track id 冲突会被 `ON CONFLICT DO NOTHING` 挡住，但白传的那份 Telegram 消息就没人引用了）。
 4. 每条 track 会记一个 `source_path`（相对导入时传给命令行的那个目录的路径），是 [Playlist](#playlist) 那边靠 `.m3u` 匹配 track 的关键——**每次都要传同一个根目录**（建议固定用 `LOCAL_MUSIC_DIR` 那个值），不然同一首歌在不同次 import 里 `source_path` 算出来不一样，匹配不上。
-
-## 从 TGFS 迁移历史存量（`scripts/sync-tgfs.ts`）
-
-如果之前用 [TGFS](https://github.com/TheodoreKrypton/tgfs) 方案（比如搭配 Navidrome + rclone）往 Telegram 传过音乐，只要这个项目用的 Bot/频道跟 TGFS 是同一个，就不需要重新上传，可以直接把这些历史存量"接"过来：
-
-**原理**：TGFS 把自己的文件索引存成一个 git 仓库（占位空文件，文件名是 `<原始文件名>.<message_id>`），`message_id` 指向一条 Telegram JSON "文件描述"消息（`{"type":"F","versions":[{"messageIds":[...]}]}`），真正的音频在 `messageIds` 指向的另一条消息里。因为 TGFS 和这个项目用的是**同一个 Bot、同一个频道**，可以用 Bot API 的 `forwardMessage` 把这些消息转发一份给自己，拿到一个这个项目的 Bot 能直接 `getFile` 的 `file_id`——全程不下载/不重新上传任何**音频**字节。唯一的例外是封面图：TGFS 的元数据里没有单独一条消息存封面，所以封面是从 `LOCAL_MUSIC_DIR` 里的本地文件读嵌入的图片、重新上传一遍（跟 `scripts/import.ts` 的做法一样，图片本来就很小）。
-
-`.env` 里额外需要：
-
-- `TGFS_GITHUB_REPO`：TGFS 文件索引所在的 GitHub 仓库（形如 `owner/repo`）
-- `TGFS_GITHUB_TOKEN`：有读权限的 GitHub token
-- `LOCAL_MUSIC_DIR`（可选）：本地那份同源音乐库的路径，用来读 ID3 标签补全时长/码率/专辑名等 TGFS 元数据里没有的信息；不填就退化成用文件夹名/文件名猜
-
-用法：
-
-```bash
-npm run sync-tgfs                    # 正式跑，只处理本地状态文件里还没记录的
-npm run sync-tgfs -- --dry-run       # 演练，不写 D1、不动 Telegram
-npm run sync-tgfs -- --limit=5       # 只处理前 5 条，小规模验证用
-npm run sync-tgfs -- --backfill-state  # 维护用：把 D1 里已有的记录"倒灌"回本地状态文件，
-                                        # 顺便补齐缺失的 source_path 和封面图（不影响音频，
-                                        # 可以反复重跑，已经补过的会自动跳过）
-```
-
-去重同样靠本地状态文件 `.sync-tgfs-state.json`（不提交进 git），不查 D1；`forwardMessage` 会在 Telegram 频道里留下转发记录（每首歌两条：一条描述消息、一条实际音频消息），这是预期行为，不是 bug。遇到 TGFS 把文件分了片（`messageIds` 有多个）的情况会跳过并在结尾列出来——现在的播放逻辑还不支持拼接多分片。
 
 ## Playlist
 
