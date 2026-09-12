@@ -1,153 +1,175 @@
 # Subsonic Telegram
 
-把 Telegram 变成免费、无限容量的私人音乐云盘：一个 Cloudflare Worker 直接实现 [Subsonic REST API](http://www.subsonic.org/pages/api.jsp)，音频文件本体存在 Telegram 私有频道里（走官方 Bot API，不依赖 rclone/WebDAV 之类的中间层），元数据存 Cloudflare D1。任何支持 Subsonic 协议的客户端（Amperfy、DSub、Ultrasonic、substreamer……）都能直接连上来听歌、管理歌单。
+*English | [中文](README-CN.md)*
 
-整个方案没有常驻服务器——Worker 按请求触发，D1 和 Telegram 都是托管服务，播放时 seek/拖进度条走的是 Telegram 文件下载接口原生支持的标准 HTTP Range（已实测验证），不需要额外绕路。
+Turn Telegram into a free, effectively unlimited-capacity personal music cloud: a Cloudflare Worker that directly implements the [Subsonic REST API](http://www.subsonic.org/pages/api.jsp). Audio files themselves live in a private Telegram channel (via the official Bot API — no rclone/WebDAV middleman), while metadata lives in Cloudflare D1. Any Subsonic-compatible client (Amperfy, DSub, Ultrasonic, substreamer, ...) can connect directly to browse, play, and manage playlists.
 
-**当前限制**：单个音乐文件不超过 20MB（Telegram Bot API `getFile` 的硬限制），超过的文件导入时会被跳过。以后如果需要支持更大文件（比如无损专辑),再考虑分片或换用 MTProto/其它存储后端。
+There's no long-running server in this setup — the Worker is invoked per-request, D1 and Telegram are both managed services, and seeking/scrubbing during playback rides on the standard HTTP Range support that Telegram's file-download endpoint natively provides (verified in practice), no extra workarounds needed.
 
-## 架构
+**Current limitation**: a single audio file must be under 20MB (a hard limit of the Telegram Bot API's `getFile`); larger files are skipped during import. If larger files (e.g. lossless albums) need to be supported down the line, chunking or switching to MTProto/another storage backend would be the way to go.
+
+## Requirements
+
+- A Telegram account (to create a bot and a private channel — see [Prerequisite](#prerequisite-create-a-telegram-bot-and-channel) below)
+- A Cloudflare account (Workers + D1 are both on the free tier for personal-scale use)
+- Node.js 22+ and npm, for local scripts and building the Web UI
+- The [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) (`npm install -g wrangler`, or use `npx wrangler`), logged in with `wrangler login`
+
+## Contents
+
+- [Architecture](#architecture)
+- [Project layout](#project-layout)
+- [Implemented endpoints](#implemented-endpoints)
+- [Prerequisite: create a Telegram bot and channel](#prerequisite-create-a-telegram-bot-and-channel)
+- [Deployment: Cloudflare Git integration](#deployment-cloudflare-git-integration-workers-builds)
+- [Importing a local music library](#importing-a-local-music-library)
+- [Playlists](#playlists)
+- [Web UI](#web-ui)
+- [Local development / testing](#local-development--testing)
+- [Security / single-user assumptions](#security--single-user-assumptions)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Architecture
 
 ```
-Subsonic 客户端
+Subsonic client
    ↕ HTTPS /rest/*.view
-Cloudflare Worker（src/index.ts，路由 + 鉴权 + 拼 Subsonic 响应）
+Cloudflare Worker (src/index.ts — routing + auth + Subsonic response building)
    ↕
-Cloudflare D1（artists/albums/tracks/users 元数据）
+Cloudflare D1 (artists/albums/tracks/playlists metadata)
    ↕ file_ref (JSON: {messageId, fileId})
-Telegram Bot API（sendDocument 上传 / getFile+文件CDN 下载，支持 Range）
+Telegram Bot API (sendDocument to upload / getFile + file CDN to download, Range supported)
 ```
 
-存储层是一个接口（`src/storage/types.ts`），当前只有 Telegram 实现（`src/storage/telegram.ts`）。以后想换成 R2/S3 之类，只需要新写一个实现这个接口的 class，路由和数据库 schema 都不用动。
+The storage layer is an interface (`src/storage/types.ts`), currently with a single Telegram implementation (`src/storage/telegram.ts`). Swapping in R2/S3/etc. later just means writing a new class that implements this interface — routing and the DB schema don't need to change.
 
-## 目录结构
+## Project layout
 
-| 路径 | 作用 |
+| Path | Purpose |
 |---|---|
-| `src/index.ts` | Worker 入口，按 `/rest/<endpoint>.view` 路由，先鉴权再分发 |
-| `src/auth.ts` | Subsonic 鉴权（token 或明文密码），`src/md5.ts` 是配套的无依赖 MD5 实现（Web Crypto 不支持 MD5） |
-| `src/subsonic/` | 响应构建（`node.ts`/`response.ts`，同一套树可以序列化成 JSON 或 XML）、各端点的业务逻辑 |
-| `src/db/queries.ts` | 所有 D1 查询 |
-| `src/storage/` | 存储后端接口 + Telegram 实现 |
-| `db/schema.sql` | D1 表结构 |
-| `scripts/import.ts` | 本地导入脚本：扫描本地音乐目录，读 tag，传 Telegram，写 D1 |
-| `scripts/import-m3u.ts` | 从本地 `.m3u`/`.m3u8` 文件建/更新 Subsonic playlist |
-| `web/` | 自带的 Web UI（Vue 3 + Vite），打包后由 Workers Static Assets 跟 API 一起提供，见下面 [Web UI](#web-ui) |
+| `src/index.ts` | Worker entry point, routes by `/rest/<endpoint>.view`, authenticates before dispatching |
+| `src/auth.ts` | Subsonic auth (token or plaintext password); credentials come from the `AUTH_USERNAME`/`AUTH_PASSWORD` Worker secrets, never stored in a database. `src/md5.ts` is the accompanying dependency-free MD5 implementation (Web Crypto doesn't support MD5) |
+| `src/subsonic/` | Response building (`node.ts`/`response.ts` — one tree that serializes to either JSON or XML) and per-endpoint business logic |
+| `src/db/queries.ts` | All D1 queries |
+| `src/storage/` | Storage backend interface + the Telegram implementation |
+| `db/schema.sql` | D1 table definitions |
+| `scripts/import.ts` | Local import script: scans a local music directory, reads tags, uploads to Telegram, writes to D1 |
+| `scripts/import-m3u.ts` | Builds/updates Subsonic playlists from local `.m3u`/`.m3u8` files |
+| `web/` | The bundled Web UI (Vue 3 + Vite), served alongside the API by Workers Static Assets once built — see [Web UI](#web-ui) below |
 
-## 已实现的端点
+## Implemented endpoints
 
 `ping` `getLicense` `getMusicFolders` `getIndexes` `getArtists` `getArtist` `getAlbum` `getSong` `getAlbumList2` `getGenres` `search3` `stream` `download` `getCoverArt` `getPlaylists` `getPlaylist` `createPlaylist` `updatePlaylist` `deletePlaylist` `getRandomSongs` `scrobble` `star` `unstar` `getStarred` `getStarred2`
 
-`scrobble`（`submission=true`，默认值）会给对应 track 的 `play_count` 加一、更新 `last_played`；`submission=false`（"正在播放"通知）目前直接忽略，不做处理。`star`/`unstar` 接受 `id`（曲目）/`albumId`/`artistId` 中的任意组合；`getStarred`/`getStarred2` 返回同一份收藏数据，只是外层标签不同（`starred` vs `starred2`），走的都是这个项目原生的 ID3 结构。
+`scrobble` (`submission=true`, the default) increments the track's `play_count` and updates `last_played`; `submission=false` ("now playing" notifications) is currently ignored outright. `star`/`unstar` accept any combination of `id` (track) / `albumId` / `artistId`. `getStarred`/`getStarred2` return the same favorites data, just under a different top-level tag (`starred` vs `starred2`) — both use this project's native ID3 structure.
 
-**客户端兼容性备注**：部分 Subsonic 客户端（实测 Amperfy）在真正调用 API 之前会先探测裸的服务器地址 `/`，把非 2xx 响应当成"服务器不存在"，导致登录直接报 404。现在 `/`（连同其它非 `/rest/*` 路径）由 Web UI 的静态资源应答，天然是 `200`，这个兼容问题顺带解决了，见下面 [Web UI](#web-ui)。
+**Client compatibility note**: some Subsonic clients (confirmed with Amperfy) probe the bare server root `/` before making any real API calls, and treat a non-2xx response as "server doesn't exist," which makes login fail with a 404. Since `/` (along with any other non-`/rest/*` path) is now served by the Web UI's static assets, it's naturally a `200`, which incidentally fixes this compatibility issue too — see [Web UI](#web-ui) below.
 
-## 部署方式：Cloudflare Git 集成（Workers Builds）
+## Prerequisite: create a Telegram bot and channel
 
-这个项目用的是 Cloudflare Dashboard 里把 Worker 跟这个 GitHub 仓库连起来的方式部署，**不是**本地跑 `wrangler deploy`。效果是：每次 push 到 `main`，Cloudflare 自动拉代码、`npm install`、按 `wrangler.toml` 构建部署，不需要手动触发。
+This is the step newcomers get stuck on most — it has nothing to do with Cloudflare, it's pure Telegram setup. By the end you'll have two values, `TG_BOT_TOKEN` and `TG_CHANNEL_ID`, which you'll enter as Worker secrets during deployment (step 4 below).
 
-但这只解决了"代码怎么发布"，下面这些是 **Git 集成不会替你做、必须手工做一次** 的事——因为它们要么是有状态的资源（数据库、密钥），要么根本不受代码变更触发：
+1. **Create a bot**: open [@BotFather](https://t.me/BotFather) in Telegram and send `/newbot`. Follow the prompts to pick a display name and a username (the username must end in `bot`). BotFather replies with a string like `123456789:AAH...` — that's your `TG_BOT_TOKEN`. Keep it safe; whoever has it has full control of the bot. Never commit it to the repo.
+2. **Create a private channel**: in your Telegram client, create a new Channel and set its type to **Private** (this channel exists purely to store audio files — it doesn't need to be, and shouldn't be, public). Once created, add the bot from step 1 as a channel administrator (Administrators → Add Admin), and make sure it has at least the "Post Messages" permission — otherwise uploads will fail.
+3. **Get the channel's `chat_id` (i.e. `TG_CHANNEL_ID`)**: a channel's chat_id is a large negative number starting with `-100` — it's not the same thing as the channel's `@username`, so you need this numeric form. Two ways to get it:
+   - Easiest: post any message in the channel, then forward that message to [@getidsbot](https://t.me/getidsbot) (or any similar "get chat id" bot) — it will reply with the full chat_id, `-100` prefix included.
+   - Or manually: make sure the bot is already a channel admin, post a message in the channel, then open `https://api.telegram.org/bot<TG_BOT_TOKEN>/getUpdates` in a browser. Look for `channel_post.chat.id` in the returned JSON — that's your `TG_CHANNEL_ID`.
+4. Keep both values handy — you'll need them during deployment (step 4 below) or for local development (`.env`/`.dev.vars`).
 
-这个仓库的 `wrangler.toml` 里 `database_id` 已经是真实值了（部署已跑通），下面 1~2 步是**从零搭一个新实例时**要做的，仅供参考：
+## Deployment: Cloudflare Git integration (Workers Builds)
 
-**1. 建 D1 数据库**（在跟 Git 集成连的**同一个** Cloudflare 账号下手动建，Cloudflare 不会自动建数据库）
+This project is deployed by connecting the Worker to this GitHub repo through the Cloudflare Dashboard — **not** by running `wrangler deploy` locally. The effect: every push to `main` gets automatically pulled by Cloudflare, `npm install`ed, and built/deployed per `wrangler.toml`, with no manual trigger needed.
+
+That only solves "how the code gets published," though. The following are things **the Git integration will never do for you and that you must do by hand once** — because they're either stateful resources (databases, secrets) or simply aren't triggered by code changes:
+
+`wrangler.toml` in this repo already has a real `database_id` (deployment is up and running). Steps 1–2 below are only relevant **when setting up a brand-new instance from scratch**, kept here for reference:
+
+**1. Create the D1 database** (do this manually, under the **same** Cloudflare account the Git integration is connected to — Cloudflare doesn't create the database automatically):
 
 ```bash
 wrangler d1 create subsonic-telegram
 ```
 
-**2. 把返回的 `database_id` 写回 `wrangler.toml`，commit + push**
+**2. Write the returned `database_id` back into `wrangler.toml`, then commit + push**
 
-Git 集成是从仓库里的 `wrangler.toml` 读配置的，占位符不改掉、不推上去，D1 binding 永远连不上。
+The Git integration reads its config from `wrangler.toml` in the repo. If the placeholder isn't replaced and pushed, the D1 binding will never connect.
 
-**3. 建表**（一次性，改了 `db/schema.sql` 之后要重新跑；push 代码不会自动跑迁移）
+**3. Create the tables** (one-time; re-run this whenever `db/schema.sql` changes — pushing code does not run migrations automatically)
 
-二选一：
-- 本地 `wrangler`（要求登录的 Cloudflare 账号跟这个 Worker 部署所在的账号一致）：
+Either:
+- Local `wrangler` (requires being logged in to the same Cloudflare account this Worker is deployed under):
   ```bash
   wrangler d1 execute subsonic-telegram --remote --file=./db/schema.sql
   ```
-- 或者直接调 Cloudflare 的 **D1 HTTP API**（不依赖本地 wrangler 登录状态，`scripts/import.ts` 等脚本走的也是这条路，需要一个有 D1 Edit 权限的 API Token）：
+- Or call Cloudflare's **D1 HTTP API** directly (doesn't depend on a local wrangler login — `scripts/import.ts` and friends use this same path; you'll need an API token with D1 Edit permission):
   ```bash
   curl -s -X POST "https://api.cloudflare.com/client/v4/accounts/<CF_ACCOUNT_ID>/d1/database/<D1_DATABASE_ID>/query" \
     -H "Authorization: Bearer <CF_API_TOKEN>" -H "Content-Type: application/json" \
     -d "$(jq -Rs '{sql: .}' db/schema.sql)"
   ```
 
-**4. 建一个登录账号**（Subsonic 客户端登录用，明文密码存 D1，仅限个人单用户部署）
+**4. Configure Worker secrets** (unrelated to code, never set by a git push, and must never be committed to the repo): your Telegram credentials (`TG_BOT_TOKEN`/`TG_CHANNEL_ID`, from [Prerequisite: create a Telegram bot and channel](#prerequisite-create-a-telegram-bot-and-channel) above) plus your login credentials (`AUTH_USERNAME`/`AUTH_PASSWORD`, used to log in from Subsonic clients — pick any username/password you like; this is for single-user personal deployments only)
 
-二选一：
-- 本地 `wrangler`：
-  ```bash
-  wrangler d1 execute subsonic-telegram --remote --command \
-    "INSERT INTO users (username, password) VALUES ('你的用户名', '你的密码');"
-  ```
-- 或者 D1 HTTP API：
-  ```bash
-  curl -s -X POST "https://api.cloudflare.com/client/v4/accounts/<CF_ACCOUNT_ID>/d1/database/<D1_DATABASE_ID>/query" \
-    -H "Authorization: Bearer <CF_API_TOKEN>" -H "Content-Type: application/json" \
-    -d '{"sql":"INSERT INTO users (username, password) VALUES (?, ?)","params":["你的用户名","你的密码"]}'
-  ```
-
-**5. 配置 Telegram 凭据**（跟代码无关，不会因为 git push 而设置，也绝对不能写进仓库）
-
-二选一：
-- 本地跑（要求 `wrangler whoami` 登录的就是跟 Git 集成同一个账号）：
+Either:
+- Locally (requires `wrangler whoami` to be logged in to the same account as the Git integration):
   ```bash
   wrangler secret put TG_BOT_TOKEN
-  wrangler secret put TG_CHANNEL_ID   # 完整 chat_id，带 -100 前缀
+  wrangler secret put TG_CHANNEL_ID   # full chat_id, including the -100 prefix
+  wrangler secret put AUTH_USERNAME
+  wrangler secret put AUTH_PASSWORD
   ```
-- 或者去 Cloudflare Dashboard → 该 Worker → Settings → Variables and Secrets 手动加。
+- Or add all four manually via Cloudflare Dashboard → this Worker → Settings → Variables and Secrets.
 
-两种方式设一次就持久化在 Worker 上，以后 git push 触发的重新部署不会清掉。
+Set once and it persists on the Worker — later git-push-triggered redeploys won't clear it. Login credentials are never stored in a database or written to any config file; they live only in the Worker's encrypted secrets, and `src/auth.ts` compares them directly against client login requests.
 
-**6. 设置构建命令**（Web UI 需要，见下面 [Web UI](#web-ui)）：Cloudflare Dashboard → 该 Worker → Settings → Build → Build command 填 `npm run build`。Workers Builds 不会自动跑 `package.json` 里的 `build` 脚本，不设这个 Web UI 就不会被打包进部署（`wrangler.toml` 里 `[assets] directory` 指向的 `web/dist` 会是空的/不存在，部署直接失败）。
+**5. Set the build command** (needed for the Web UI — see [Web UI](#web-ui) below): Cloudflare Dashboard → this Worker → Settings → Build → Build command, set to `npm run build`. Workers Builds does not automatically run the `build` script from `package.json`; without setting this, the Web UI won't get bundled into the deployment (the `web/dist` directory that `[assets] directory` in `wrangler.toml` points to will be empty/missing, and the deploy will fail outright).
 
-**7. （可选）自定义域名**：Worker 的 Settings → Domains & Routes 里加域名，再去 Cloudflare DNS 配对应记录。这跟传统"nginx 反代 + Origin CA 证书"那一套不是一回事——Workers 自定义域名由 Cloudflare 直接签发证书，不需要自己搞 nginx/证书。
+**6. (Optional) Custom domain**: add a domain under the Worker's Settings → Domains & Routes, then configure the matching Cloudflare DNS record. This isn't the same as a traditional "nginx reverse proxy + Origin CA certificate" setup — Workers custom domains get their certificates issued directly by Cloudflare, no nginx/certificate wrangling required.
 
-**8. 验证**：`curl https://<worker地址>/rest/ping.view?u=<用户名>&p=<密码>&v=1.16.1&c=test&f=json`，应该返回 `{"subsonic-response":{"status":"ok",...}}`。
+**7. Verify**: `curl https://<your-worker>/rest/ping.view?u=<username>&p=<password>&v=1.16.1&c=test&f=json` should return `{"subsonic-response":{"status":"ok",...}}`.
 
-## 导入本地音乐库
+## Importing a local music library
 
-导入脚本走 Cloudflare 的 D1 HTTP API（D1 binding 只能在 Worker 里用，普通 Node 脚本连不上，只能走 REST）。
+The import script talks to Cloudflare through the D1 HTTP API (D1 bindings only work from inside a Worker, so a plain Node script has to go through REST instead).
 
-1. 复制 `.env.example` 为 `.env`，填好：
-   - `TG_BOT_TOKEN` / `TG_CHANNEL_ID`：跟 Worker secrets 用同一份
-   - `CF_ACCOUNT_ID`：Cloudflare 账号 ID
-   - `CF_API_TOKEN`：有 D1 编辑权限的 token
-   - `D1_DATABASE_ID`：第 2 步 `wrangler d1 create` 返回的 database_id
-2. 跑：
+1. Copy `.env.example` to `.env` and fill in:
+   - `TG_BOT_TOKEN` / `TG_CHANNEL_ID`: the same values used for the Worker secrets
+   - `CF_ACCOUNT_ID`: your Cloudflare account ID
+   - `CF_API_TOKEN`: a token with D1 edit permission
+   - `D1_DATABASE_ID`: the database_id returned by `wrangler d1 create` in step 2 above
+2. Run:
    ```bash
    npm run import -- /path/to/music
-   npm run import -- /path/to/music --limit=300   # 覆盖默认的单次 100 个上限
+   npm run import -- /path/to/music --limit=300   # override the default 100-files-per-run cap
    ```
-   会递归扫描目录下的 mp3/flac/m4a/ogg/opus/wav（自动跳过 macOS 在非 HFS+ 盘上产生的 `._` 开头的 AppleDouble 影子文件——那不是音频，混进去只会生成一堆时长 0、"Unknown Artist" 的垃圾 track），读 tag（艺人/专辑/标题/年份/流派/封面），上传到 Telegram，写入 D1。超过 19MB 的文件会跳过并打印警告。**每次最多上传 100 个新文件**（`--limit=` 可覆盖），处理完这批就退出；库大的话多跑几次同一条命令，靠下面第 3 点的本地状态文件自动接着传，不会重复。
-3. 已经传过的文件记在本地 `.import-state.json`（不提交进 git），下次跑同一个目录会自动跳过，可以随时中断重跑。**去重只看本地这个文件，不查 D1**（有意的取舍——省 D1 读配额），代价是如果这个文件丢了/搬了机器，重跑会把同一批文件重新传一遍 Telegram（D1 那边不会出现重复记录，因为 track id 冲突会被 `ON CONFLICT DO NOTHING` 挡住，但白传的那份 Telegram 消息就没人引用了）。
-4. 每条 track 会记一个 `source_path`（相对导入时传给命令行的那个目录的路径），是 [Playlist](#playlist) 那边靠 `.m3u` 匹配 track 的关键——**每次都要传同一个根目录**（建议固定用 `LOCAL_MUSIC_DIR` 那个值），不然同一首歌在不同次 import 里 `source_path` 算出来不一样，匹配不上。
+   This recursively scans the directory for mp3/flac/m4a/ogg/opus/wav files (automatically skipping macOS AppleDouble shadow files starting with `._`, which show up on non-HFS+ volumes — they aren't audio, and importing them just produces a pile of zero-duration "Unknown Artist" junk tracks). It reads tags (artist/album/title/year/genre/cover art), uploads to Telegram, and writes to D1. Files over 19MB are skipped with a warning. **Each run uploads at most 100 new files** (override with `--limit=`), then exits; for a large library, run the same command multiple times — the local state file (see point 3 below) automatically picks up where it left off, without re-uploading anything.
+3. Already-imported files are tracked in a local `.import-state.json` (not committed to git); re-running the same directory automatically skips them, and you can interrupt and re-run anytime. **Deduplication only checks this local file, not D1** (a deliberate tradeoff to save D1 read quota) — the downside being that if this file is lost or you move to a different machine, re-running will re-upload the same batch of files to Telegram (D1 won't end up with duplicate rows, since a conflicting track id gets blocked by `ON CONFLICT DO NOTHING`, but the redundant Telegram messages from the wasted upload won't be referenced by anything).
+4. Each track records a `source_path` (its path relative to the directory you passed on the command line at import time) — this is the key [Playlist](#playlist) matching relies on to match `.m3u` entries to tracks. **Always pass the same root directory** (it's recommended to fix this to your `LOCAL_MUSIC_DIR` value) — otherwise the same song will compute a different `source_path` across import runs and won't match up.
 
-## Playlist
+## Playlists
 
-`getPlaylists`/`getPlaylist`/`createPlaylist`/`updatePlaylist`/`deletePlaylist` 都实现了标准 Subsonic 语义，客户端里能正常增删改查。
+`getPlaylists`/`getPlaylist`/`createPlaylist`/`updatePlaylist`/`deletePlaylist` all implement standard Subsonic semantics, so clients can create/edit/delete playlists normally.
 
-除了让客户端自己建 playlist，也可以从本地已有的 `.m3u`/`.m3u8` 文件批量生成：
+Besides letting a client create playlists itself, you can also bulk-generate them from existing local `.m3u`/`.m3u8` files:
 
 ```bash
 npm run import-m3u -- /path/to/playlist.m3u
 ```
 
-原理是拿 `.m3u` 里列的每个文件路径，换算成相对 `LOCAL_MUSIC_DIR`（或 `--music-dir=` 指定的目录）的路径，去 D1 按 `source_path` 精确匹配已导入的 track——**所以 `.m3u` 里引用的歌必须先用 `npm run import` 导入过**，没导入的会在结尾列出来，提示去先导入。重跑同一个 `.m3u` 文件会更新同名 playlist（按名字算出固定 id），不会重复建。
+This works by taking each file path listed in the `.m3u`, converting it to a path relative to `LOCAL_MUSIC_DIR` (or the directory given via `--music-dir=`), and matching it against already-imported tracks in D1 by exact `source_path`. **So any song referenced in the `.m3u` must already have been imported via `npm run import`** — anything not yet imported gets listed at the end, prompting you to import it first. Re-running the same `.m3u` file updates the same-named playlist (its id is derived deterministically from the name), rather than creating a duplicate.
 
 ## Web UI
 
-`web/` 是一个 Vue 3 + Vite 单页应用，直接调 `/rest/*` API（跟第三方 Subsonic 客户端走的是同一套接口），提供浏览歌库、播放、管理 playlist 的界面——不做上传/编辑，那部分场景交给上面的脚本。
+`web/` is a Vue 3 + Vite single-page app that calls the `/rest/*` API directly (the same interface third-party Subsonic clients use), providing a browsing/playback/playlist-management UI. It doesn't handle uploading or editing — that's left to the scripts above.
 
-**页面**：Home（库统计 + 最近新增/最近播放/最多播放）、Artists（按 ID3 艺人/专辑浏览）、Songs（扁平化全曲目列表，支持排序分页）、Folders（按导入时的本地文件夹结构浏览，见下）、Search、Playlists。
+**Pages**: Home (library stats + recently added/recently played/most played), Artists (browse by ID3 artist/album), Songs (a flat, sortable, paginated track list), Folders (browse by the original local folder structure — see below), Search, Playlists.
 
-**Folders 是什么**：按 `source_path`（`npm run import` 记录的、相对导入根目录的路径）还原出原始文件夹树，跟 Artists 那种按 ID3 标签分组的浏览方式并列存在。对那些"合集"文件夹（比如按月份存的热歌榜）特别有用——这类文件夹里每首歌的 ID3 艺人标签都不一样，按 Artists 浏览会被打散到几十上百个艺人名下，按 Folders 浏览则完全保留原来"一个文件夹一份合集"的样子。对应的后端接口是 `getFolder`（`src/index.ts`），跟 `getLibraryStats`/`getSongs`/`getRecentlyPlayed`/`getMostPlayed` 一样，都不是 Subsonic 官方协议的一部分，只服务于这个项目自己的 Web UI。
+**What "Folders" is**: it reconstructs the original folder tree from `source_path` (recorded by `npm run import`, relative to the import root directory), as an alternative to the ID3-tag-based grouping that Artists uses. This is especially useful for "compilation" folders (e.g. a monthly hits chart) — where each song's ID3 artist tag differs, so browsing by Artists scatters them across dozens or hundreds of artist names, while browsing by Folders preserves the original "one folder, one compilation" structure intact. The backing endpoint is `getFolder` (in `src/index.ts`), which — like `getLibraryStats`/`getSongs`/`getRecentlyPlayed`/`getMostPlayed` — isn't part of the official Subsonic protocol; it only exists to serve this project's own Web UI.
 
-**样式**：Tailwind CSS v4（通过 `@tailwindcss/vite`，不需要单独的 `postcss.config.js`），单一深色主题，手写 `.glass` 毛玻璃卡片 + 固定定位的模糊渐变"极光"背景块，没有做明暗双主题切换。
+**Styling**: Tailwind CSS v4 (via `@tailwindcss/vite`, no separate `postcss.config.js` needed), a single dark theme, hand-rolled `.glass` frosted-glass cards plus fixed, blurred gradient "aurora" background blobs — no light/dark theme toggle.
 
-**怎么跟 Worker 拼在一起**：Cloudflare Workers 的 Static Assets 功能，`wrangler.toml` 里配的：
+**How it's wired into the Worker**: via Cloudflare Workers' Static Assets feature, configured in `wrangler.toml`:
 
 ```toml
 [assets]
@@ -157,33 +179,41 @@ run_worker_first = ["/rest/*"]
 not_found_handling = "single-page-application"
 ```
 
-`run_worker_first` 只对 `/rest/*` 生效，意味着别的路径（`/`、`/playlists/xxx` 等）**根本不会进 `src/index.ts`**，直接由 Cloudflare 从 `web/dist` 静态返回（`not_found_handling = "single-page-application"` 让 Vue Router 的客户端路由刷新/直接访问也能命中 `index.html`）。这也是为什么之前给 Amperfy 打的那个"根路径特判"补丁被删掉了——现在 `/` 天然由真实的 `index.html` 应答。
+`run_worker_first` only applies to `/rest/*`, meaning every other path (`/`, `/playlists/xxx`, etc.) **never reaches `src/index.ts`** — Cloudflare serves it statically from `web/dist` directly (`not_found_handling = "single-page-application"` lets Vue Router's client-side routing handle refreshes/direct navigation and still resolve to `index.html`). This is also why the earlier special-case patch for Amperfy's root-path probing was removed — `/` is now naturally answered by the real `index.html`.
 
-**鉴权模型**：登录界面收集用户名密码，跟其它 Subsonic 客户端一样存在浏览器本地（`localStorage`），之后每个 API/`stream`/`getCoverArt` 请求都带上——这意味着密码会出现在这些请求的 URL 查询参数里（浏览器历史、Performance API 等能看到），是 Subsonic 协议这套经典鉴权方式本身的特性，不是这个 Web UI 独有的新增风险，个人单用户部署下可接受。
+**Auth model**: the login screen collects a username and password and, like other Subsonic clients, stores them in the browser locally (`localStorage`), attaching them to every subsequent API/`stream`/`getCoverArt` request — meaning the password shows up in these requests' URL query parameters (visible in browser history, the Performance API, etc). This is an inherent property of Subsonic's classic auth scheme itself, not a risk newly introduced by this Web UI, and is acceptable for a personal, single-user deployment.
 
-**本地开发**：
+**Local development**:
 
 ```bash
 cd web
 npm install
-npm run dev              # 默认代理 /rest 到 http://127.0.0.1:8787（wrangler dev）
-VITE_API_PROXY_TARGET=https://<你的worker地址> npm run dev   # 或者直接代理到已部署的真实后端
+npm run dev              # proxies /rest to http://127.0.0.1:8787 (wrangler dev) by default
+VITE_API_PROXY_TARGET=https://<your-worker> npm run dev   # or proxy directly to a deployed backend
 ```
 
-**构建/部署**：根目录 `npm run build`（= `npm --prefix web ci && npm --prefix web run build`）会把 `web/dist` 建出来，`wrangler deploy`/Git 集成部署时由 `[assets]` 一并发布。**本地第一次跑 `wrangler dev`/`wrangler deploy` 之前必须先跑一次这个 build**，`web/dist` 目录不存在的话 wrangler 会直接报错拒绝启动。Git 集成走的是 Cloudflare Dashboard 的 Build command（见上面部署步骤第 6 步），不是这里的 `npm run build`——两处都要配对。
+**Build/deploy**: running `npm run build` at the repo root (= `npm --prefix web ci && npm --prefix web run build`) produces `web/dist`, which gets published alongside the Worker via `[assets]` when you run `wrangler deploy` or deploy through the Git integration. **You must run this build once before the first local `wrangler dev`/`wrangler deploy`** — if `web/dist` doesn't exist, wrangler will refuse to start with an error. The Git integration path uses the Cloudflare Dashboard's Build command (see deployment step 5 above) instead of this local `npm run build` — both need to be kept in sync.
 
-## 本地开发 / 测试
+## Local development / testing
 
 ```bash
-npm run db:migrate:local   # 建本地 D1（wrangler 本地模拟）
-npm run dev                # wrangler dev，读 .dev.vars 里的 Telegram 凭据
+npm run db:migrate:local   # create a local D1 (wrangler's local simulation)
+npm run dev                # wrangler dev, reads Telegram credentials from .dev.vars
 ```
 
-`.dev.vars` 跟 `.env` 内容一样（Telegram 凭据），是 wrangler dev 专用的本地 secrets 文件，两者都不提交进 git。
+`.dev.vars` has the same contents as `.env` (Telegram credentials) — it's the local secrets file wrangler dev uses specifically; neither file is committed to git.
 
-本地测试可以直接往本地 D1 塞几条假数据（`wrangler d1 execute subsonic-telegram --local --command "..."`），配合真实的 Telegram 凭据测 `stream`/`getCoverArt`，因为 Telegram 那边始终是真实 API，不区分本地/远程。
+For local testing you can insert a few fake rows directly into the local D1 (`wrangler d1 execute subsonic-telegram --local --command "..."`), and test `stream`/`getCoverArt` against real Telegram credentials, since Telegram's side is always the real API regardless of local vs. remote.
 
-## 安全 / 单用户假设
+## Security / single-user assumptions
 
-- `users.password` 明文存库：Subsonic 的经典 token 鉴权（`t = md5(password + salt)`）要求服务端能拿到明文密码重算哈希，没有绕过的办法。这套东西设计成个人自用，不要在这张表里塞会在别处复用的密码。
-- 没做多用户/权限隔离、没有速率限制。当前定位是"我自己用"，不是给别人开账号的公共服务。
+- `AUTH_PASSWORD` is stored as plaintext in Worker secrets: Subsonic's classic token auth (`t = md5(password + salt)`) requires the server to have the plaintext password on hand to recompute the hash — there's no way around this. This is designed for personal use; don't use a password here that you reuse elsewhere.
+- There's no multi-user support, no permission isolation, and no rate limiting. The current scope is "for my own use," not a public service meant to host other people's accounts.
+
+## Contributing
+
+Issues and pull requests are welcome — this is a personal-scale project, so please keep the single-user design goals above in mind (no multi-tenant auth, no rate limiting) rather than treating them as gaps to fix. For anything beyond a small fix, opening an issue first to discuss the approach is appreciated.
+
+## License
+
+[MIT](LICENSE)

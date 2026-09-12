@@ -2,8 +2,16 @@
   "name": "subsonic-telegram",
   "version": "0.1.0",
   "description": "Subsonic API server on Cloudflare Workers, backed by Telegram as file storage",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/playwjj/subsonic-telegram.git"
+  },
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
