@@ -73,3 +73,13 @@ CREATE TABLE IF NOT EXISTS starred (
 
 -- Auth credentials live in the AUTH_USERNAME/AUTH_PASSWORD Worker secrets
 -- (see wrangler.toml), not in D1 — see src/auth.ts.
+
+-- Folders are normally just derived from tracks.source_path (see
+-- listTracksUnderPath/getFolder) — there's no row here unless a folder was
+-- explicitly created empty (via the Web UI's "New folder") before any track
+-- was uploaded into it. getFolder merges both sources when listing a
+-- directory's children.
+CREATE TABLE IF NOT EXISTS folders (
+  path       TEXT PRIMARY KEY,
+  created_at INTEGER NOT NULL
+);

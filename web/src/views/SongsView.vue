@@ -47,7 +47,7 @@ async function handleDelete(song: Song) {
       </select>
     </div>
 
-    <p v-if="loading" class="text-[var(--text-dim)]">Loading…</p>
+    <p v-if="loading" class="flex items-center gap-2 text-[var(--text-dim)]"><span class="spinner"></span> Loading…</p>
     <p v-else-if="!songs.length" class="text-[var(--text-dim)]">No songs yet.</p>
 
     <div v-else class="glass p-2">

@@ -80,6 +80,24 @@ button:disabled {
   color: var(--danger);
 }
 
+/* Small inline loading indicator — pair with text like "Uploading…" so a
+   busy state reads as active rather than a possibly-frozen page. */
+.spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.15em;
+  border: 2px solid var(--border);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Frosted-glass panel, used across cards/dropdowns/the player bar. */
 .glass {
   background: rgba(255, 255, 255, 0.05);

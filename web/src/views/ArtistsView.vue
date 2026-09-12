@@ -20,7 +20,7 @@ onMounted(async () => {
 <template>
   <div class="artists">
     <h1>Library</h1>
-    <p v-if="loading">Loading…</p>
+    <p v-if="loading" class="flex items-center gap-2 text-[var(--text-dim)]"><span class="spinner"></span> Loading…</p>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="!loading && !error && indexes.length === 0">No artists yet — import some music first.</p>
     <div v-for="group in indexes" :key="group.name" class="group">

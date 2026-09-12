@@ -53,7 +53,7 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-8">
-    <p v-if="loading" class="text-[var(--text-dim)]">Loading…</p>
+    <p v-if="loading" class="flex items-center gap-2 text-[var(--text-dim)]"><span class="spinner"></span> Loading…</p>
 
     <section v-if="stats" class="glass grid grid-cols-2 gap-4 p-6 sm:grid-cols-4">
       <div>

@@ -29,7 +29,7 @@ async function create() {
       <input v-model="newName" placeholder="New playlist name" />
       <button type="submit">Create</button>
     </form>
-    <p v-if="loading">Loading…</p>
+    <p v-if="loading" class="flex items-center gap-2 text-[var(--text-dim)]"><span class="spinner"></span> Loading…</p>
     <p v-else-if="!playlists.length">No playlists yet.</p>
     <ul v-else class="glass p-2">
       <li v-for="p in playlists" :key="p.id">

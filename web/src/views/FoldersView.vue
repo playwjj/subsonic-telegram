@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { getFolder, renameFolder, deleteTrack, type Song } from "../api/subsonic";
+import { getFolder, renameFolder, createFolder, deleteTrack, type Song } from "../api/subsonic";
 import { playQueue } from "../stores/player";
 import TrackRow from "../components/TrackRow.vue";
 
@@ -76,6 +76,23 @@ async function confirmRenameSelf() {
   await router.push({ name: "folders", params: { path: [...segments.value.slice(0, -1), name] } });
 }
 
+const creatingFolder = ref(false);
+const newFolderName = ref("");
+
+function startCreateFolder() {
+  creatingFolder.value = true;
+  newFolderName.value = "";
+}
+
+async function confirmCreateFolder() {
+  if (!creatingFolder.value) return;
+  const name = newFolderName.value.trim();
+  creatingFolder.value = false;
+  if (!name) return;
+  await createFolder(currentPath.value, name);
+  await load(currentPath.value);
+}
+
 async function handleDelete(song: Song) {
   if (!confirm(`Permanently delete "${song.title}"? This also removes the file from Telegram.`)) return;
   await deleteTrack(song.id);
@@ -107,7 +124,26 @@ async function handleDelete(song: Song) {
       </template>
     </div>
 
-    <p v-if="loading" class="text-[var(--text-dim)]">Loading…</p>
+    <div class="mb-4 flex flex-wrap items-center gap-2 text-sm">
+      <RouterLink
+        :to="{ name: 'upload', query: { folder: currentPath } }"
+        class="rounded-lg border border-[var(--border)] px-3 py-1.5 hover:bg-[var(--surface-hover)]"
+      >
+        ⬆ Upload here
+      </RouterLink>
+      <button v-if="!creatingFolder" @click="startCreateFolder">+ New folder</button>
+      <input
+        v-else
+        v-model="newFolderName"
+        placeholder="Folder name"
+        autofocus
+        @keyup.enter="confirmCreateFolder"
+        @keyup.esc="creatingFolder = false"
+        @blur="confirmCreateFolder"
+      />
+    </div>
+
+    <p v-if="loading" class="flex items-center gap-2 text-[var(--text-dim)]"><span class="spinner"></span> Loading…</p>
     <p v-else-if="!dirs.length && !songs.length" class="text-[var(--text-dim)]">Empty folder.</p>
 
     <div v-if="dirs.length" class="glass mb-4 p-2">

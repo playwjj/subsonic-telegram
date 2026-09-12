@@ -587,18 +587,50 @@ export async function deleteTrackCascade(db: D1Database, trackId: string): Promi
   return { fileRef: track.file_ref };
 }
 
+// Explicit empty-folder registrations — see db/schema.sql. getFolder merges
+// these with the folders it derives from tracks.source_path.
+export async function listFoldersUnderPath(db: D1Database, prefix: string): Promise<{ path: string }[]> {
+  const pattern = prefix ? `${prefix}/%` : "%";
+  const { results } = await db
+    .prepare(`SELECT path FROM folders WHERE path LIKE ? ORDER BY path COLLATE NOCASE`)
+    .bind(pattern)
+    .all<{ path: string }>();
+  return results;
+}
+
+export async function createFolder(db: D1Database, path: string): Promise<void> {
+  await db
+    .prepare(`INSERT INTO folders (path, created_at) VALUES (?, ?) ON CONFLICT(path) DO NOTHING`)
+    .bind(path, Math.floor(Date.now() / 1000))
+    .run();
+}
+
 // Renames just the leaf segment of a folder — every track whose source_path
 // starts with oldPrefix + "/" gets that prefix swapped for newPrefix.
 // Returns how many tracks moved (0 means the folder didn't exist).
 export async function renameFolder(db: D1Database, oldPrefix: string, newPrefix: string): Promise<number> {
-  const rows = await listTracksUnderPath(db, oldPrefix);
-  if (!rows.length) return 0;
-  await db.batch(
-    rows.map((row) =>
+  const trackRows = await listTracksUnderPath(db, oldPrefix);
+  // Also catch an explicit registration for the folder itself (path === oldPrefix,
+  // e.g. it was created empty and may still be) or for any empty sub-folder
+  // registered under it.
+  const { results: folderRows } = await db
+    .prepare(`SELECT path FROM folders WHERE path = ? OR path LIKE ?`)
+    .bind(oldPrefix, `${oldPrefix}/%`)
+    .all<{ path: string }>();
+
+  if (!trackRows.length && !folderRows.length) return 0;
+
+  await db.batch([
+    ...trackRows.map((row) =>
       db
         .prepare(`UPDATE tracks SET source_path = ? WHERE id = ?`)
         .bind(newPrefix + row.source_path!.slice(oldPrefix.length), row.id),
     ),
-  );
-  return rows.length;
+    ...folderRows.map((row) =>
+      db
+        .prepare(`UPDATE folders SET path = ? WHERE path = ?`)
+        .bind(newPrefix + row.path.slice(oldPrefix.length), row.path),
+    ),
+  ]);
+  return trackRows.length + folderRows.length;
 }

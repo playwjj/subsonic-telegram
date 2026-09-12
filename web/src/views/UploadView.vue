@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import { reactive, ref } from "vue";
+import { useRoute } from "vue-router";
 import { uploadTrack, MAX_UPLOAD_TRACK_BYTES, SubsonicError, type Song } from "../api/subsonic";
 
 const AUDIO_EXTENSIONS = [".mp3", ".flac", ".m4a", ".ogg", ".opus", ".wav"];
+
+// Arriving from Folders' "Upload here" link carries the current folder as a
+// query param — keep it across resetForm() (uploading several files in a
+// row should stay targeted at that folder) instead of wiping it each time.
+const route = useRoute();
+const presetFolder = typeof route.query.folder === "string" ? route.query.folder : "";
 
 const form = reactive({
   title: "",
@@ -12,7 +19,7 @@ const form = reactive({
   genre: "",
   trackNumber: undefined as number | undefined,
   discNumber: undefined as number | undefined,
-  folder: "",
+  folder: presetFolder,
 });
 
 const file = ref<File | null>(null);
@@ -36,7 +43,7 @@ function resetForm() {
   form.genre = "";
   form.trackNumber = undefined;
   form.discNumber = undefined;
-  form.folder = "";
+  form.folder = presetFolder;
   duration.value = undefined;
   bitrate.value = undefined;
 }
@@ -123,7 +130,9 @@ async function submit() {
     <div class="glass space-y-4 p-4">
       <div>
         <input type="file" accept=".mp3,.flac,.m4a,.ogg,.opus,.wav" @change="handleFileChange" />
-        <p v-if="parsing" class="mt-1 text-sm text-[var(--text-dim)]">Reading tags…</p>
+        <p v-if="parsing" class="mt-1 flex items-center gap-2 text-sm text-[var(--text-dim)]">
+          <span class="spinner"></span> Reading tags…
+        </p>
       </div>
 
       <form v-if="file" class="space-y-3" @submit.prevent="submit">
@@ -164,7 +173,9 @@ async function submit() {
           <input v-model="form.folder" placeholder="80s/Rock" class="mt-1 w-full" />
         </label>
 
-        <button type="submit" :disabled="uploading">{{ uploading ? "Uploading…" : "Upload" }}</button>
+        <button type="submit" class="inline-flex items-center gap-2" :disabled="uploading">
+          <span v-if="uploading" class="spinner"></span> {{ uploading ? "Uploading…" : "Upload" }}
+        </button>
       </form>
 
       <p v-if="error" class="error">{{ error }}</p>

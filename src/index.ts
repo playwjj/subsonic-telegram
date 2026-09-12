@@ -305,7 +305,10 @@ export default {
 
       case "getFolder": {
         const path = params.get("path") ?? "";
-        const rows = await q.listTracksUnderPath(env.DB, path);
+        const [rows, explicitFolders] = await Promise.all([
+          q.listTracksUnderPath(env.DB, path),
+          q.listFoldersUnderPath(env.DB, path),
+        ]);
         const prefixLen = path ? path.length + 1 : 0;
         const dirs = new Set<string>();
         const tracks: typeof rows = [];
@@ -314,6 +317,14 @@ export default {
           const slashIdx = rest.indexOf("/");
           if (slashIdx === -1) tracks.push(row);
           else dirs.add(rest.slice(0, slashIdx));
+        }
+        // Merge in folders that were explicitly created empty (see
+        // db/schema.sql) — same "just take the next path segment" logic,
+        // just against folders.path instead of a track's source_path.
+        for (const { path: folderPath } of explicitFolders) {
+          const rest = folderPath.slice(prefixLen);
+          const slashIdx = rest.indexOf("/");
+          dirs.add(slashIdx === -1 ? rest : rest.slice(0, slashIdx));
         }
         return respond(
           subsonicSuccess(
@@ -407,6 +418,18 @@ export default {
           console.warn(`Failed to delete Telegram message for track ${id}: ${err}`);
         }
         return respond(subsonicSuccess(), format);
+      }
+
+      case "createFolder": {
+        const parentPath = params.get("path") ?? "";
+        const name = params.get("name");
+        if (!name) return respond(subsonicError(ERR.MISSING_PARAM, "Missing name"), format);
+        if (name.includes("/") || name === "." || name === "..") {
+          return respond(subsonicError(0, "Invalid folder name"), format);
+        }
+        const fullPath = parentPath ? `${parentPath}/${name}` : name;
+        await q.createFolder(env.DB, fullPath);
+        return respond(subsonicSuccess(node("folder", { path: fullPath })), format);
       }
 
       case "renameFolder": {
