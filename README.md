@@ -62,16 +62,32 @@ Git 集成是从仓库里的 `wrangler.toml` 读配置的，占位符不改掉�
 
 **3. 建表**（一次性，改了 `db/schema.sql` 之后要重新跑；push 代码不会自动跑迁移）
 
-```bash
-wrangler d1 execute subsonic-telegram --remote --file=./db/schema.sql
-```
+二选一：
+- 本地 `wrangler`（要求登录的 Cloudflare 账号跟这个 Worker 部署所在的账号一致）：
+  ```bash
+  wrangler d1 execute subsonic-telegram --remote --file=./db/schema.sql
+  ```
+- 或者直接调 Cloudflare 的 **D1 HTTP API**（不依赖本地 wrangler 登录状态，`scripts/import.ts` 等脚本走的也是这条路，需要一个有 D1 Edit 权限的 API Token）：
+  ```bash
+  curl -s -X POST "https://api.cloudflare.com/client/v4/accounts/<CF_ACCOUNT_ID>/d1/database/<D1_DATABASE_ID>/query" \
+    -H "Authorization: Bearer <CF_API_TOKEN>" -H "Content-Type: application/json" \
+    -d "$(jq -Rs '{sql: .}' db/schema.sql)"
+  ```
 
 **4. 建一个登录账号**（Subsonic 客户端登录用，明文密码存 D1，仅限个人单用户部署）
 
-```bash
-wrangler d1 execute subsonic-telegram --remote --command \
-  "INSERT INTO users (username, password) VALUES ('你的用户名', '你的密码');"
-```
+二选一：
+- 本地 `wrangler`：
+  ```bash
+  wrangler d1 execute subsonic-telegram --remote --command \
+    "INSERT INTO users (username, password) VALUES ('你的用户名', '你的密码');"
+  ```
+- 或者 D1 HTTP API：
+  ```bash
+  curl -s -X POST "https://api.cloudflare.com/client/v4/accounts/<CF_ACCOUNT_ID>/d1/database/<D1_DATABASE_ID>/query" \
+    -H "Authorization: Bearer <CF_API_TOKEN>" -H "Content-Type: application/json" \
+    -d '{"sql":"INSERT INTO users (username, password) VALUES (?, ?)","params":["你的用户名","你的密码"]}'
+  ```
 
 **5. 配置 Telegram 凭据**（跟代码无关，不会因为 git push 而设置，也绝对不能写进仓库）
 
