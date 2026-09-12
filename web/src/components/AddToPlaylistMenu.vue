@@ -71,13 +71,15 @@ async function createAndAdd() {
   position: absolute;
   right: 0;
   top: 2rem;
-  z-index: 10;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  z-index: 30;
+  background: rgba(23, 26, 33, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
   min-width: 12rem;
   padding: 0.4rem;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 .option {
   display: block;
