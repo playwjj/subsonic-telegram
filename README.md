@@ -36,26 +36,28 @@ Telegram Bot API（sendDocument 上传 / getFile+文件CDN 下载，支持 Range
 
 还没做（用得上再加）：`getPlaylists`/`createPlaylist` 系列、`scrobble`、`getRandomSongs`、`getStarred`。
 
-## 首次搭建
+## 部署方式：Cloudflare Git 集成（Workers Builds）
 
-**1. 装依赖**
+这个项目用的是 Cloudflare Dashboard 里把 Worker 跟这个 GitHub 仓库连起来的方式部署，**不是**本地跑 `wrangler deploy`。效果是：每次 push 到 `main`，Cloudflare 自动拉代码、`npm install`、按 `wrangler.toml` 构建部署，不需要手动触发。
 
-```bash
-npm install
-```
+但这只解决了"代码怎么发布"，下面这些是 **Git 集成不会替你做、必须手工做一次** 的事——因为它们要么是有状态的资源（数据库、密钥），要么根本不受代码变更触发：
 
-**2. 建 D1 数据库**（手动，Cloudflare 个人账号下）
+**⚠️ 当前阻塞项**：仓库里 `wrangler.toml` 的 `database_id` 还是占位符 `REPLACE_AFTER_WRANGLER_D1_CREATE`，不是真实 D1 数据库 id。Git 集成触发的构建会在"绑定 D1"这一步失败，必须先完成下面第 1~2 步、把真实 id 提交回仓库，部署才能成功。
+
+**1. 建 D1 数据库**（在跟 Git 集成连的**同一个** Cloudflare 账号下手动建，Cloudflare 不会自动建数据库）
 
 ```bash
 wrangler d1 create subsonic-telegram
 ```
 
-把返回的 `database_id` 填进 `wrangler.toml` 的 `database_id = "REPLACE_AFTER_WRANGLER_D1_CREATE"`。
+**2. 把返回的 `database_id` 写回 `wrangler.toml`，commit + push**
 
-**3. 建表**
+Git 集成是从仓库里的 `wrangler.toml` 读配置的，占位符不改掉、不推上去，D1 binding 永远连不上。
+
+**3. 建表**（一次性，改了 `db/schema.sql` 之后要重新跑；push 代码不会自动跑迁移）
 
 ```bash
-npm run db:migrate:remote
+wrangler d1 execute subsonic-telegram --remote --file=./db/schema.sql
 ```
 
 **4. 建一个登录账号**（Subsonic 客户端登录用，明文密码存 D1，仅限个人单用户部署）
@@ -65,20 +67,21 @@ wrangler d1 execute subsonic-telegram --remote --command \
   "INSERT INTO users (username, password) VALUES ('你的用户名', '你的密码');"
 ```
 
-**5. 配置 Worker 的 Telegram 凭据**（生产用 secrets，不写进 wrangler.toml）
+**5. 配置 Telegram 凭据**（跟代码无关，不会因为 git push 而设置，也绝对不能写进仓库）
 
-```bash
-wrangler secret put TG_BOT_TOKEN
-wrangler secret put TG_CHANNEL_ID   # 完整 chat_id，带 -100 前缀
-```
+二选一：
+- 本地跑（要求 `wrangler whoami` 登录的就是跟 Git 集成同一个账号）：
+  ```bash
+  wrangler secret put TG_BOT_TOKEN
+  wrangler secret put TG_CHANNEL_ID   # 完整 chat_id，带 -100 前缀
+  ```
+- 或者去 Cloudflare Dashboard → 该 Worker → Settings → Variables and Secrets 手动加。
 
-**6. 部署**
+两种方式设一次就持久化在 Worker 上，以后 git push 触发的重新部署不会清掉。
 
-```bash
-npm run deploy
-```
+**6. （可选）自定义域名**：Worker 的 Settings → Domains & Routes 里加域名，再去 Cloudflare DNS 配对应记录（做法跟 `alice-creator` 里 `music3.dengchong.com` 那套 Origin CA 证书方案不是一回事——Workers 自定义域名由 Cloudflare 直接签发证书，不需要自己搞 nginx/Origin CA）。
 
-部署后 Subsonic 客户端指向 `https://<你的worker地址>/rest`，用第 4 步建的账号登录。
+**7. 验证**：`curl https://<worker地址>/rest/ping.view?u=<用户名>&p=<密码>&v=1.16.1&c=test&f=json`，应该返回 `{"subsonic-response":{"status":"ok",...}}`。
 
 ## 导入本地音乐库
 
