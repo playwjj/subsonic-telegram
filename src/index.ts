@@ -13,6 +13,22 @@ const ERR = {
   NOT_FOUND: 70,
 };
 
+// Same ceiling scripts/import.ts enforces (its MAX_FILE_BYTES): a file that
+// uploads fine past Telegram's 50MB sendDocument limit could still never be
+// streamed back, since getFile caps downloads at ~20MB. So uploads from the
+// web UI are held to this tighter limit, not the storage layer's looser one.
+const MAX_UPLOAD_TRACK_BYTES = 19 * 1024 * 1024;
+
+// Used for both uploadTrack's optional "folder" param (may have several
+// segments) and renameFolder's "name" param (must be a single segment).
+function sanitizeFolderPath(input: string): string {
+  return input
+    .split("/")
+    .map((seg) => seg.trim())
+    .filter((seg) => seg.length > 0 && seg !== "." && seg !== "..")
+    .join("/");
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -314,6 +330,87 @@ export default {
           ),
           format,
         );
+      }
+
+      case "uploadTrack": {
+        const title = params.get("title");
+        const artistName = params.get("artist");
+        const albumName = params.get("album");
+        const filename = params.get("filename");
+        const contentType = params.get("contentType");
+        if (!title || !artistName || !albumName || !filename || !contentType) {
+          return respond(
+            subsonicError(ERR.MISSING_PARAM, "Missing title/artist/album/filename/contentType"),
+            format,
+          );
+        }
+
+        const bytes = new Uint8Array(await request.arrayBuffer());
+        if (bytes.byteLength === 0) return respond(subsonicError(0, "Empty file"), format);
+        if (bytes.byteLength > MAX_UPLOAD_TRACK_BYTES) {
+          return respond(
+            subsonicError(0, `File exceeds ${MAX_UPLOAD_TRACK_BYTES} byte limit (Telegram getFile download cap)`),
+            format,
+          );
+        }
+
+        const year = params.get("year") ? Number(params.get("year")) : null;
+        const genre = params.get("genre") || null;
+        const trackNo = params.get("trackNumber") ? Number(params.get("trackNumber")) : null;
+        const discNo = params.get("discNumber") ? Number(params.get("discNumber")) : null;
+        const duration = params.get("duration") ? Math.round(Number(params.get("duration"))) : null;
+        const bitrate = params.get("bitrate") ? Math.round(Number(params.get("bitrate"))) : null;
+        const folder = sanitizeFolderPath(params.get("folder") ?? "");
+        const sourcePath = folder ? `${folder}/${filename}` : null;
+        const suffix = filename.includes(".") ? filename.slice(filename.lastIndexOf(".") + 1).toLowerCase() : "";
+
+        const artistId = await q.ensureArtist(env.DB, artistName);
+        const albumId = await q.ensureAlbum(env.DB, albumName, artistId, year, genre);
+        const fileRef = await storage.putFile(bytes, filename, contentType);
+        const trackId = await q.insertTrack(env.DB, {
+          albumId,
+          artistId,
+          title,
+          trackNo,
+          discNo,
+          duration,
+          suffix,
+          contentType,
+          size: bytes.byteLength,
+          bitrate,
+          fileRef,
+          sourcePath,
+          filename,
+        });
+        const track = await q.getTrack(env.DB, trackId);
+        return respond(subsonicSuccess(songNode(track!)), format);
+      }
+
+      case "deleteTrack": {
+        const id = params.get("id");
+        if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
+        const result = await q.deleteTrackCascade(env.DB, id);
+        if (!result) return respond(subsonicError(ERR.NOT_FOUND, "Song not found"), format);
+        try {
+          await storage.deleteFile(result.fileRef);
+        } catch (err) {
+          console.warn(`Failed to delete Telegram message for track ${id}: ${err}`);
+        }
+        return respond(subsonicSuccess(), format);
+      }
+
+      case "renameFolder": {
+        const path = params.get("path");
+        const name = params.get("name");
+        if (!path || !name) return respond(subsonicError(ERR.MISSING_PARAM, "Missing path or name"), format);
+        if (name.includes("/") || name === "." || name === "..") {
+          return respond(subsonicError(0, "Invalid folder name"), format);
+        }
+        const parentPrefix = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+        const newPath = parentPrefix ? `${parentPrefix}/${name}` : name;
+        const count = await q.renameFolder(env.DB, path, newPath);
+        if (count === 0) return respond(subsonicError(ERR.NOT_FOUND, "Folder not found"), format);
+        return respond(subsonicSuccess(node("folder", { path: newPath })), format);
       }
 
       default:

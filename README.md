@@ -25,6 +25,7 @@ There's no long-running server in this setup — the Worker is invoked per-reque
 - [Importing a local music library](#importing-a-local-music-library)
 - [Playlists](#playlists)
 - [Web UI](#web-ui)
+  - [Uploading a track from the Web UI](#uploading-a-track-from-the-web-ui)
 - [Local development / testing](#local-development--testing)
 - [Security / single-user assumptions](#security--single-user-assumptions)
 - [Contributing](#contributing)
@@ -71,7 +72,7 @@ The storage layer is an interface (`src/storage/types.ts`), currently with a sin
 This is the step newcomers get stuck on most — it has nothing to do with Cloudflare, it's pure Telegram setup. By the end you'll have two values, `TG_BOT_TOKEN` and `TG_CHANNEL_ID`, which you'll enter as Worker secrets during deployment (step 4 below).
 
 1. **Create a bot**: open [@BotFather](https://t.me/BotFather) in Telegram and send `/newbot`. Follow the prompts to pick a display name and a username (the username must end in `bot`). BotFather replies with a string like `123456789:AAH...` — that's your `TG_BOT_TOKEN`. Keep it safe; whoever has it has full control of the bot. Never commit it to the repo.
-2. **Create a private channel**: in your Telegram client, create a new Channel and set its type to **Private** (this channel exists purely to store audio files — it doesn't need to be, and shouldn't be, public). Once created, add the bot from step 1 as a channel administrator (Administrators → Add Admin), and make sure it has at least the "Post Messages" permission — otherwise uploads will fail.
+2. **Create a private channel**: in your Telegram client, create a new Channel and set its type to **Private** (this channel exists purely to store audio files — it doesn't need to be, and shouldn't be, public). Once created, add the bot from step 1 as a channel administrator (Administrators → Add Admin), and make sure it has at least the "Post Messages" permission — otherwise uploads will fail. Also grant "Delete Messages" if you want the Web UI's delete-track feature to actually remove the file from Telegram — without it, deleting a track still removes it from the library (D1), but the Telegram message is left behind (harmless, same class of leftover as an interrupted `npm run import`).
 3. **Get the channel's `chat_id` (i.e. `TG_CHANNEL_ID`)**: a channel's chat_id is a large negative number starting with `-100` — it's not the same thing as the channel's `@username`, so you need this numeric form. Two ways to get it:
    - Easiest: post any message in the channel, then forward that message to [@getidsbot](https://t.me/getidsbot) (or any similar "get chat id" bot) — it will reply with the full chat_id, `-100` prefix included.
    - Or manually: make sure the bot is already a channel admin, post a message in the channel, then open `https://api.telegram.org/bot<TG_BOT_TOKEN>/getUpdates` in a browser. Look for `channel_post.chat.id` in the returned JSON — that's your `TG_CHANNEL_ID`.
@@ -161,11 +162,21 @@ This works by taking each file path listed in the `.m3u`, converting it to a pat
 
 ## Web UI
 
-`web/` is a Vue 3 + Vite single-page app that calls the `/rest/*` API directly (the same interface third-party Subsonic clients use), providing a browsing/playback/playlist-management UI. It doesn't handle uploading or editing — that's left to the scripts above.
+`web/` is a Vue 3 + Vite single-page app that calls the `/rest/*` API directly (the same interface third-party Subsonic clients use), providing a browsing/playback/playlist-management UI, plus one-at-a-time upload/delete/folder-rename for managing the library directly from the browser (bulk import still stays the CLI script's job — see [Uploading a track from the Web UI](#uploading-a-track-from-the-web-ui) below).
 
 **Pages**: Home (library stats + recently added/recently played/most played), Artists (browse by ID3 artist/album), Songs (a flat, sortable, paginated track list), Folders (browse by the original local folder structure — see below), Search, Playlists.
 
 **What "Folders" is**: it reconstructs the original folder tree from `source_path` (recorded by `npm run import`, relative to the import root directory), as an alternative to the ID3-tag-based grouping that Artists uses. This is especially useful for "compilation" folders (e.g. a monthly hits chart) — where each song's ID3 artist tag differs, so browsing by Artists scatters them across dozens or hundreds of artist names, while browsing by Folders preserves the original "one folder, one compilation" structure intact. The backing endpoint is `getFolder` (in `src/index.ts`), which — like `getLibraryStats`/`getSongs`/`getRecentlyPlayed`/`getMostPlayed` — isn't part of the official Subsonic protocol; it only exists to serve this project's own Web UI.
+
+### Uploading a track from the Web UI
+
+The Upload page (nav bar → Upload) adds one track at a time — tags (artist/album/title/year/genre/track/disc number) are read client-side in the browser, via `music-metadata`'s `parseBlob`, and pre-fill an editable form; parsing failures just leave the fields blank (title falls back to the filename) rather than blocking the upload. The Worker itself does no tag parsing — this keeps it dependency-free and running in the plain Workers runtime, same as everywhere else in `src/`.
+
+- Same 19MB cap as `npm run import` (Telegram's `getFile` download limit) — a file that uploaded past that could never be streamed back, so it's rejected client-side and server-side both.
+- The optional "Folder" field (e.g. `80s/Rock`) sets `source_path`, so the track shows up under Folders too — leave it blank and the track just won't appear there (only under Artists/Songs).
+- Cover art isn't handled by this form; a new album created this way simply has no cover, same as any album whose `cover_ref` is unset.
+- **Deleting a track** (a 🗑 button on Songs/Album/Folders rows — not on playlist or search views, which have their own non-destructive "remove from playlist"/nothing) permanently removes the track from D1 (cleaning up any playlist entries and star, and the album/artist too if that was their last track) and best-effort deletes the Telegram message (see the "Delete Messages" bot permission note above).
+- **Renaming a folder** (the ✎ button next to a subfolder, or next to the current folder's own breadcrumb segment) only renames that one path segment — it updates every affected track's `source_path` in D1, nothing on the Telegram side.
 
 **Styling**: Tailwind CSS v4 (via `@tailwindcss/vite`, no separate `postcss.config.js` needed), a single dark theme, hand-rolled `.glass` frosted-glass cards plus fixed, blurred gradient "aurora" background blobs — no light/dark theme toggle.
 

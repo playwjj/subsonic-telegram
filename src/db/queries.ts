@@ -1,3 +1,5 @@
+import { md5Hex } from "../md5";
+
 export interface ArtistRow {
   id: string;
   name: string;
@@ -455,4 +457,148 @@ export async function listTracksUnderPath(db: D1Database, prefix: string): Promi
     .bind(pattern)
     .all<TrackRow>();
   return results;
+}
+
+// --- Web UI upload / delete / folder rename ---
+// Mirrors scripts/import.ts's ensureArtist/ensureAlbum/insert-track logic
+// (same md5-of-natural-key id scheme, so a name uploaded from the web UI
+// lines up with the same artist/album a CLI import already created) but
+// goes through the D1 binding directly instead of the HTTP API, since this
+// only ever runs inside the Worker.
+
+function stripArticle(name: string): string {
+  return name.replace(/^(the|a|an)\s+/i, "");
+}
+
+export async function ensureArtist(db: D1Database, name: string): Promise<string> {
+  const id = md5Hex(`artist:${name.toLowerCase()}`);
+  await db
+    .prepare(`INSERT INTO artists (id, name, sort_name) VALUES (?, ?, ?) ON CONFLICT(id) DO NOTHING`)
+    .bind(id, name, stripArticle(name))
+    .run();
+  return id;
+}
+
+export async function ensureAlbum(
+  db: D1Database,
+  name: string,
+  artistId: string,
+  year: number | null,
+  genre: string | null,
+): Promise<string> {
+  const id = md5Hex(`album:${artistId}:${name.toLowerCase()}`);
+  await db
+    .prepare(
+      `INSERT INTO albums (id, name, artist_id, year, genre, created_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO NOTHING`,
+    )
+    .bind(id, name, artistId, year, genre, Math.floor(Date.now() / 1000))
+    .run();
+  return id;
+}
+
+export interface NewTrackInput {
+  albumId: string;
+  artistId: string;
+  title: string;
+  trackNo: number | null;
+  discNo: number | null;
+  duration: number | null;
+  suffix: string;
+  contentType: string;
+  size: number;
+  bitrate: number | null;
+  fileRef: string;
+  sourcePath: string | null;
+  filename: string;
+}
+
+export async function insertTrack(db: D1Database, input: NewTrackInput): Promise<string> {
+  const id = md5Hex(`track:${input.albumId}:${input.filename}`);
+  await db
+    .prepare(
+      `INSERT INTO tracks
+         (id, album_id, artist_id, title, track_no, disc_no, duration, suffix, content_type, size, bitrate, file_ref, created_at, source_path)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO NOTHING`,
+    )
+    .bind(
+      id,
+      input.albumId,
+      input.artistId,
+      input.title,
+      input.trackNo,
+      input.discNo,
+      input.duration,
+      input.suffix,
+      input.contentType,
+      input.size,
+      input.bitrate,
+      input.fileRef,
+      Math.floor(Date.now() / 1000),
+      input.sourcePath,
+    )
+    .run();
+  return id;
+}
+
+export interface DeletedTrackInfo {
+  fileRef: string;
+}
+
+// db/schema.sql has no ON DELETE behavior at all, so playlist_tracks/starred
+// rows referencing this track (and an album/artist left with zero tracks)
+// have to be cleaned up by hand here.
+export async function deleteTrackCascade(db: D1Database, trackId: string): Promise<DeletedTrackInfo | null> {
+  const track = await db
+    .prepare(`SELECT file_ref, album_id, artist_id FROM tracks WHERE id = ?`)
+    .bind(trackId)
+    .first<{ file_ref: string; album_id: string; artist_id: string }>();
+  if (!track) return null;
+
+  await db.batch([
+    db.prepare(`DELETE FROM playlist_tracks WHERE track_id = ?`).bind(trackId),
+    db.prepare(`DELETE FROM starred WHERE item_type = 'track' AND item_id = ?`).bind(trackId),
+    db.prepare(`DELETE FROM tracks WHERE id = ?`).bind(trackId),
+  ]);
+
+  const remainingInAlbum = await db
+    .prepare(`SELECT COUNT(*) as c FROM tracks WHERE album_id = ?`)
+    .bind(track.album_id)
+    .first<{ c: number }>();
+  if (remainingInAlbum?.c === 0) {
+    await db.batch([
+      db.prepare(`DELETE FROM starred WHERE item_type = 'album' AND item_id = ?`).bind(track.album_id),
+      db.prepare(`DELETE FROM albums WHERE id = ?`).bind(track.album_id),
+    ]);
+
+    const remainingArtistAlbums = await db
+      .prepare(`SELECT COUNT(*) as c FROM albums WHERE artist_id = ?`)
+      .bind(track.artist_id)
+      .first<{ c: number }>();
+    if (remainingArtistAlbums?.c === 0) {
+      await db.batch([
+        db.prepare(`DELETE FROM starred WHERE item_type = 'artist' AND item_id = ?`).bind(track.artist_id),
+        db.prepare(`DELETE FROM artists WHERE id = ?`).bind(track.artist_id),
+      ]);
+    }
+  }
+
+  return { fileRef: track.file_ref };
+}
+
+// Renames just the leaf segment of a folder — every track whose source_path
+// starts with oldPrefix + "/" gets that prefix swapped for newPrefix.
+// Returns how many tracks moved (0 means the folder didn't exist).
+export async function renameFolder(db: D1Database, oldPrefix: string, newPrefix: string): Promise<number> {
+  const rows = await listTracksUnderPath(db, oldPrefix);
+  if (!rows.length) return 0;
+  await db.batch(
+    rows.map((row) =>
+      db
+        .prepare(`UPDATE tracks SET source_path = ? WHERE id = ?`)
+        .bind(newPrefix + row.source_path!.slice(oldPrefix.length), row.id),
+    ),
+  );
+  return rows.length;
 }

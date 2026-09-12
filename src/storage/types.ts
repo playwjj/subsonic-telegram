@@ -6,4 +6,5 @@
 export interface StorageBackend {
   putFile(bytes: Uint8Array, filename: string, mimeType: string): Promise<string>;
   getFileResponse(ref: string, rangeHeader: string | null, contentType?: string): Promise<Response>;
+  deleteFile(ref: string): Promise<void>;
 }

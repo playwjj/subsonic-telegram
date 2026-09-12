@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import { getAlbum, coverArtUrl, type AlbumDetail } from "../api/subsonic";
+import { useRouter } from "vue-router";
+import { getAlbum, deleteTrack, coverArtUrl, type AlbumDetail, type Song } from "../api/subsonic";
 import { playQueue } from "../stores/player";
 import TrackRow from "../components/TrackRow.vue";
 
 const props = defineProps<{ id: string }>();
 const album = ref<AlbumDetail | null>(null);
 const error = ref("");
+const router = useRouter();
 
 async function load(id: string) {
   error.value = "";
@@ -22,6 +24,20 @@ watch(() => props.id, load, { immediate: true });
 function playFrom(index: number) {
   if (album.value) playQueue(album.value.song, index);
 }
+
+async function handleDelete(song: Song) {
+  if (!confirm(`Permanently delete "${song.title}"? This also removes the file from Telegram.`)) return;
+  await deleteTrack(song.id);
+  if (!album.value) return;
+  // Deleting an album's last track deletes the now-empty album server-side
+  // too, so this page's id would no longer resolve — bail out to the artist.
+  if (album.value.song.length === 1) {
+    await router.push({ name: "artist", params: { id: album.value.artistId } });
+    return;
+  }
+  album.value.song = album.value.song.filter((s) => s.id !== song.id);
+  album.value.songCount--;
+}
 </script>
 
 <template>
@@ -36,7 +52,14 @@ function playFrom(index: number) {
       </div>
     </div>
     <div class="tracks glass p-2">
-      <TrackRow v-for="(song, i) in album.song" :key="song.id" :song="song" @play="playFrom(i)" />
+      <TrackRow
+        v-for="(song, i) in album.song"
+        :key="song.id"
+        :song="song"
+        deletable
+        @play="playFrom(i)"
+        @delete="handleDelete(song)"
+      />
     </div>
   </div>
   <p v-else-if="error" class="error">{{ error }}</p>

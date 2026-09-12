@@ -15,6 +15,7 @@ const routes = [
     props: true,
   },
   { path: "/search", name: "search", component: () => import("./views/SearchView.vue") },
+  { path: "/upload", name: "upload", component: () => import("./views/UploadView.vue") },
   { path: "/playlists", name: "playlists", component: () => import("./views/PlaylistsView.vue") },
   {
     path: "/playlists/:id",

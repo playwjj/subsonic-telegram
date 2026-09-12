@@ -13,6 +13,7 @@ const navLinks = [
   { to: "/folders", label: "Folders" },
   { to: "/search", label: "Search" },
   { to: "/playlists", label: "Playlists" },
+  { to: "/upload", label: "Upload" },
 ];
 
 async function handleLogout() {

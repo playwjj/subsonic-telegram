@@ -85,4 +85,21 @@ export class TelegramStorage implements StorageBackend {
     outHeaders.set("content-length", String(total));
     return new Response(body, { status: 200, headers: outHeaders });
   }
+
+  // Requires the bot to hold the channel's "Delete messages" admin right.
+  // Callers should treat failure here as non-fatal (log and move on) rather
+  // than blocking a D1 delete on it — same tolerance this project already
+  // has for other "wasted" Telegram messages (see the import script's docs).
+  async deleteFile(refStr: string): Promise<void> {
+    const ref = JSON.parse(refStr) as TelegramRef;
+    const res = await fetch(this.api("deleteMessage"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: this.channelId, message_id: ref.messageId }),
+    });
+    const data = (await res.json()) as any;
+    if (!data.ok) {
+      throw new Error(`Telegram deleteMessage failed: ${JSON.stringify(data)}`);
+    }
+  }
 }

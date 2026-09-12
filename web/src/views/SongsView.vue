@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import { getSongs, type Song, type SongSort } from "../api/subsonic";
+import { getSongs, deleteTrack, type Song, type SongSort } from "../api/subsonic";
 import { playQueue } from "../stores/player";
 import TrackRow from "../components/TrackRow.vue";
 
@@ -26,6 +26,13 @@ function changeSort(next: SongSort) {
   sort.value = next;
   page.value = 0;
 }
+
+async function handleDelete(song: Song) {
+  if (!confirm(`Permanently delete "${song.title}"? This also removes the file from Telegram.`)) return;
+  await deleteTrack(song.id);
+  songs.value = songs.value.filter((s) => s.id !== song.id);
+  total.value--;
+}
 </script>
 
 <template>
@@ -44,7 +51,14 @@ function changeSort(next: SongSort) {
     <p v-else-if="!songs.length" class="text-[var(--text-dim)]">No songs yet.</p>
 
     <div v-else class="glass p-2">
-      <TrackRow v-for="(song, i) in songs" :key="song.id" :song="song" @play="playQueue(songs, i)" />
+      <TrackRow
+        v-for="(song, i) in songs"
+        :key="song.id"
+        :song="song"
+        deletable
+        @play="playQueue(songs, i)"
+        @delete="handleDelete(song)"
+      />
     </div>
 
     <div v-if="total > PAGE_SIZE" class="mt-4 flex items-center justify-center gap-3 text-sm">

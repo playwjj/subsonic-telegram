@@ -265,3 +265,55 @@ export async function getFolder(path: string): Promise<FolderListing> {
     songs: body.folder.song ?? [],
   };
 }
+
+// Same 19MB cap the Worker enforces (Telegram's getFile download limit) —
+// checked here first just for fast feedback, the server check is authoritative.
+export const MAX_UPLOAD_TRACK_BYTES = 19 * 1024 * 1024;
+
+export interface UploadTrackMetadata {
+  title: string;
+  artist: string;
+  album: string;
+  year?: number;
+  genre?: string;
+  trackNumber?: number;
+  discNumber?: number;
+  duration?: number;
+  bitrate?: number;
+  folder?: string;
+}
+
+export async function uploadTrack(file: File, metadata: UploadTrackMetadata): Promise<Song> {
+  const search = buildSearch(
+    {
+      title: metadata.title,
+      artist: metadata.artist,
+      album: metadata.album,
+      year: metadata.year,
+      genre: metadata.genre,
+      trackNumber: metadata.trackNumber,
+      discNumber: metadata.discNumber,
+      duration: metadata.duration,
+      bitrate: metadata.bitrate,
+      folder: metadata.folder,
+      filename: file.name,
+      contentType: file.type || "application/octet-stream",
+    },
+    getCredentials(),
+  );
+  const res = await fetch(`/rest/uploadTrack.view?${search.toString()}`, { method: "POST", body: file });
+  const data = (await res.json()) as { "subsonic-response": any };
+  const body = data["subsonic-response"];
+  if (body.status !== "ok") {
+    throw new SubsonicError(body.error?.code ?? 0, body.error?.message ?? "Unknown error");
+  }
+  return body.song as Song;
+}
+
+export async function deleteTrack(id: string): Promise<void> {
+  await call("deleteTrack", { id });
+}
+
+export async function renameFolder(path: string, name: string): Promise<void> {
+  await call("renameFolder", { path, name });
+}
