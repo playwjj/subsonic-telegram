@@ -34,8 +34,13 @@ function formatDuration(sec?: number): string {
   border-bottom: 1px solid var(--border);
 }
 .play-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 2rem;
   height: 2rem;
+  padding: 0;
+  line-height: 1;
   border-radius: 50%;
   border: none;
   background: var(--surface-hover);

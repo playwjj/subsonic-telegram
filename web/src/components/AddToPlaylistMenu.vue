@@ -54,8 +54,13 @@ async function createAndAdd() {
   position: relative;
 }
 .icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 1.75rem;
   height: 1.75rem;
+  padding: 0;
+  line-height: 1;
   border-radius: 50%;
   border: 1px solid var(--border);
   background: transparent;

@@ -106,12 +106,17 @@ async function removePlaylist() {
   flex-shrink: 0;
 }
 .reorder button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: 1px solid var(--border);
   color: inherit;
   border-radius: 4px;
   width: 1.6rem;
   height: 1.6rem;
+  padding: 0;
+  line-height: 1;
   cursor: pointer;
 }
 .reorder button:disabled {
