@@ -17,6 +17,11 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (!url.pathname.startsWith("/rest/")) {
+      // Some Subsonic clients (e.g. Amperfy) probe the bare server URL before
+      // calling the API and treat a non-2xx response as "server not found".
+      if (url.pathname === "/") {
+        return new Response("Subsonic-Telegram API server", { status: 200 });
+      }
       return new Response("Not found", { status: 404 });
     }
     let endpoint = url.pathname.slice("/rest/".length);
