@@ -66,8 +66,6 @@ Git 集成是从仓库里的 `wrangler.toml` 读配置的，占位符不改掉�
 wrangler d1 execute subsonic-telegram --remote --file=./db/schema.sql
 ```
 
-⚠️ **已知坑**：本机 `wrangler` 走的是环境变量里的 `CLOUDFLARE_API_TOKEN`（登录身份可能是别的项目/账号常用的那个），不一定跟这个 Worker 部署所在的 Cloudflare 账号是同一个——`wrangler whoami` 能看到的账号列表里如果没有目标账号，`wrangler secret put`/`wrangler d1 execute --remote`/`wrangler tail` 这些都会失败或连错账号，且这种失败往往不直观（认证错误、而不是明确提示"账号不对"）。踩到这个坑时的绕过办法：改用 Cloudflare 的 **D1 HTTP API**（`https://api.cloudflare.com/client/v4/accounts/<CF_ACCOUNT_ID>/d1/database/<D1_DATABASE_ID>/query`，带 `Authorization: Bearer <CF_API_TOKEN>`）直接跑 SQL，效果跟 `wrangler d1 execute --remote` 等价，且不依赖本机 wrangler 的登录身份——`scripts/import.ts`/`scripts/import-m3u.ts` 全部走的这条路。Secrets（`TG_BOT_TOKEN`/`TG_CHANNEL_ID`）目前只能通过 Cloudflare Dashboard 手动设置来绕开这个问题（见下面第 5 步），HTTP API 没有对应的写入端点。
-
 **4. 建一个登录账号**（Subsonic 客户端登录用，明文密码存 D1，仅限个人单用户部署）
 
 ```bash
