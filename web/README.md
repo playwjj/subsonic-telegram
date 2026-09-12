@@ -1,6 +1,6 @@
 # web
 
-The web UI for `subsonic-telegram` — Vue 3 + Vite, talking directly to the Worker's `/rest/*` Subsonic API. See the [root README](../README.md#web-ui) for how this gets built and deployed.
+The web UI for Subsonic Telegram — Vue 3 + Vite, talking directly to the Worker's `/rest/*` Subsonic API. See the [root README](../README.md#web-ui) for how this gets built and deployed.
 
 ```bash
 npm install
