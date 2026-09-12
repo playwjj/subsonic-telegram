@@ -9,7 +9,7 @@ export async function streamTrack(
 ): Promise<Response> {
   const track = await q.getTrack(db, id);
   if (!track) return new Response("Not found", { status: 404 });
-  return storage.getFileResponse(track.file_ref, rangeHeader);
+  return storage.getFileResponse(track.file_ref, rangeHeader, track.content_type);
 }
 
 export async function getCoverArt(db: D1Database, storage: StorageBackend, id: string): Promise<Response> {

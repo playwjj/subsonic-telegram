@@ -5,5 +5,5 @@
 // later only means writing a new class here — no schema or route changes.
 export interface StorageBackend {
   putFile(bytes: Uint8Array, filename: string, mimeType: string): Promise<string>;
-  getFileResponse(ref: string, rangeHeader: string | null): Promise<Response>;
+  getFileResponse(ref: string, rangeHeader: string | null, contentType?: string): Promise<Response>;
 }
