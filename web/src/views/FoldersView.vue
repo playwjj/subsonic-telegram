@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { getFolder, renameFolder, createFolder, deleteFolder, deleteTrack, SubsonicError, type Song } from "../api/subsonic";
+import {
+  getFolder,
+  renameFolder,
+  createFolder,
+  deleteFolder,
+  deleteTrack,
+  SubsonicError,
+  type FolderDir,
+  type Song,
+} from "../api/subsonic";
 import { playQueue } from "../stores/player";
 import TrackRow from "../components/TrackRow.vue";
 
@@ -19,7 +28,7 @@ const segments = computed(() => {
 });
 const currentPath = computed(() => segments.value.join("/"));
 
-const dirs = ref<string[]>([]);
+const dirs = ref<FolderDir[]>([]);
 const songs = ref<Song[]>([]);
 const loading = ref(true);
 const error = ref("");
@@ -181,21 +190,21 @@ async function handleDelete(song: Song) {
     <p v-else-if="!dirs.length && !songs.length" class="text-[var(--text-dim)]">Empty folder.</p>
 
     <div v-if="dirs.length" class="glass mb-4 p-2">
-      <div v-for="dir in dirs" :key="dir" class="flex items-center gap-2 rounded-lg px-2 py-2 text-sm hover:bg-white/5">
+      <div v-for="dir in dirs" :key="dir.name" class="flex items-center gap-2 rounded-lg px-2 py-2 text-sm hover:bg-white/5">
         <span>📁</span>
         <input
-          v-if="renamingDir === dir"
+          v-if="renamingDir === dir.name"
           v-model="renameValue"
           class="!py-0.5 flex-1 text-sm"
           autofocus
-          @keyup.enter="confirmRenameDir(dir)"
+          @keyup.enter="confirmRenameDir(dir.name)"
           @keyup.esc="renamingDir = null"
-          @blur="confirmRenameDir(dir)"
+          @blur="confirmRenameDir(dir.name)"
         />
-        <RouterLink v-else :to="{ name: 'folders', params: { path: [...segments, dir] } }" class="flex-1">{{ dir }}</RouterLink>
-        <template v-if="renamingDir !== dir">
-          <button class="edit-btn" title="Rename folder" @click="startRenameDir(dir)">✎</button>
-          <button class="edit-btn" title="Delete (must be empty)" @click="handleDeleteDir(dir)">🗑</button>
+        <RouterLink v-else :to="{ name: 'folders', params: { path: [...segments, dir.name] } }" class="flex-1">{{ dir.name }}</RouterLink>
+        <template v-if="renamingDir !== dir.name">
+          <button class="edit-btn" title="Rename folder" @click="startRenameDir(dir.name)">✎</button>
+          <button v-if="dir.empty" class="edit-btn" title="Delete this empty folder" @click="handleDeleteDir(dir.name)">🗑</button>
         </template>
       </div>
     </div>

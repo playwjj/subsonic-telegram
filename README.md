@@ -20,6 +20,7 @@ There's no long-running server in this setup — the Worker is invoked per-reque
 - [Architecture](#architecture)
 - [Project layout](#project-layout)
 - [Implemented endpoints](#implemented-endpoints)
+- [Connecting a Subsonic client](#connecting-a-subsonic-client)
 - [Prerequisite: create a Telegram bot and channel](#prerequisite-create-a-telegram-bot-and-channel)
 - [Deployment: Cloudflare Git integration](#deployment-cloudflare-git-integration-workers-builds)
 - [Importing a local music library](#importing-a-local-music-library)
@@ -66,6 +67,27 @@ The storage layer is an interface (`src/storage/types.ts`), currently with a sin
 `scrobble` (`submission=true`, the default) increments the track's `play_count` and updates `last_played`; `submission=false` ("now playing" notifications) is currently ignored outright. `star`/`unstar` accept any combination of `id` (track) / `albumId` / `artistId`. `getStarred`/`getStarred2` return the same favorites data, just under a different top-level tag (`starred` vs `starred2`) — both use this project's native ID3 structure.
 
 **Client compatibility note**: some Subsonic clients (confirmed with Amperfy) probe the bare server root `/` before making any real API calls, and treat a non-2xx response as "server doesn't exist," which makes login fail with a 404. Since `/` (along with any other non-`/rest/*` path) is now served by the Web UI's static assets, it's naturally a `200`, which incidentally fixes this compatibility issue too — see [Web UI](#web-ui) below.
+
+## Connecting a Subsonic client
+
+This is the whole point of the project, worth calling out explicitly: this Worker is a **real Subsonic server**, not a bespoke app that only works with the bundled Web UI. The [Subsonic API](http://www.subsonic.org/pages/api.jsp) is an open protocol that originated with the old Subsonic media server and today is spoken by a whole ecosystem of self-hosted servers (Navidrome, Airsonic, Ampache, gonic, ...) and, more usefully here, by dozens of existing client apps across every platform. Because this project implements that exact protocol (see [Implemented endpoints](#implemented-endpoints) above), any of those apps already works with it — nothing to build, no plugin, no custom integration.
+
+**Some popular clients**, pick whichever fits your platform — all of these connect to any Subsonic-compatible server, this one included:
+- iOS: Amperfy, play:Sub, iSub
+- Android: DSub, Ultrasonic, Symfonium, substreamer
+- Desktop / cross-platform: Feishin, Sublime Music (Linux), Supersonic
+
+**Setup is identical in every one of them** — three fields:
+
+| Field | Value |
+|---|---|
+| Server address | your Worker's URL, e.g. `https://music.example.com` (no `/rest` suffix — the client appends that itself) |
+| Username | whatever you set `AUTH_USERNAME` to (see [Deployment](#deployment-cloudflare-git-integration-workers-builds) step 4) |
+| Password | whatever you set `AUTH_PASSWORD` to |
+
+No self-signed certificate hassle and no "allow insecure/HTTP" toggle to flip — Cloudflare issues a real TLS certificate for your domain like any other site, so every client's default HTTPS-only mode just works. If a client asks for an API version, `1.16.1` (or "auto") is fine.
+
+Want to check the server itself before pointing a client at it? That's exactly what the `curl .../ping.view` check in [Deployment step 7](#deployment-cloudflare-git-integration-workers-builds) is for.
 
 ## Prerequisite: create a Telegram bot and channel
 
@@ -178,7 +200,7 @@ The Upload page (nav bar → Upload, or "⬆ Upload here" from any Folders page 
 - **Deleting a track** (a 🗑 button on Songs/Album/Folders rows — not on playlist or search views, which have their own non-destructive "remove from playlist"/nothing) permanently removes the track from D1 (cleaning up any playlist entries and star, and the album/artist too if that was their last track) and best-effort deletes the Telegram message (see the "Delete Messages" bot permission note above).
 - **Renaming a folder** (the ✎ button next to a subfolder, or next to the current folder's own breadcrumb segment) only renames that one path segment — it updates every affected track's `source_path` in D1, nothing on the Telegram side.
 - **Creating an empty folder** ("+ New folder" on any Folders page) registers a path in a small `folders` D1 table — folders are otherwise purely derived from tracks' `source_path`, so this is the only way to have one exist before anything's been uploaded into it. `getFolder` merges both sources when listing a directory.
-- **Deleting a folder** (the 🗑 next to a subfolder, or next to the current folder's own breadcrumb once it has nothing left in it) only removes that `folders` registration — it's refused with "Folder is not empty" if it still has tracks or a nested folder in it, so this never deletes tracks. Use the track delete button for that first.
+- **Deleting a folder** (the 🗑 shown only on subfolders `getFolder` reports as actually empty, or next to the current folder's own breadcrumb once it has nothing left in it) only removes that `folders` registration — it's refused with "Folder is not empty" if it still has tracks or a nested folder in it, so this never deletes tracks. Use the track delete button for that first.
 
 **Styling**: Tailwind CSS v4 (via `@tailwindcss/vite`, no separate `postcss.config.js` needed), a single dark theme, hand-rolled `.glass` frosted-glass cards plus fixed, blurred gradient "aurora" background blobs — no light/dark theme toggle.
 

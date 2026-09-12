@@ -67,6 +67,27 @@ Telegram Bot API（sendDocument 上传 / getFile+文件CDN 下载，支持 Range
 
 **客户端兼容性备注**：部分 Subsonic 客户端（实测 Amperfy）在真正调用 API 之前会先探测裸的服务器地址 `/`，把非 2xx 响应当成"服务器不存在"，导致登录直接报 404。现在 `/`（连同其它非 `/rest/*` 路径）由 Web UI 的静态资源应答，天然是 `200`，这个兼容问题顺带解决了，见下面 [Web UI](#web-ui)。
 
+## 用 Subsonic 客户端连接
+
+这其实是这个项目的核心价值所在，值得单独拎出来说清楚：这个 Worker 是一个**真正的 Subsonic 服务端**，不是一个只能配自带 Web UI 用的自造玩具。[Subsonic API](http://www.subsonic.org/pages/api.jsp) 是一套源自老牌 Subsonic 音乐服务器的开放协议，现在一大票自建音乐服务端（Navidrome、Airsonic、Ampache、gonic……）都在说这套协议，更重要的是——市面上早就有几十个跨平台的现成客户端在说这套协议。因为这个项目实现的就是这套协议本身（见上面[已实现的端点](#已实现的端点)），随便挑一个现成客户端就能直接连上来用，不用装插件、不用做任何定制对接。
+
+**常见客户端**（按平台任选一个，它们连的是任何兼容 Subsonic 协议的服务端，这个项目也不例外）：
+- iOS：Amperfy、play:Sub、iSub
+- Android：DSub、Ultrasonic、Symfonium、substreamer
+- 桌面/跨平台：Feishin、Sublime Music（Linux）、Supersonic
+
+**这些客户端的配置方式都一样**，就三个字段：
+
+| 字段 | 填什么 |
+|---|---|
+| 服务器地址 | 你的 Worker 地址，比如 `https://music.example.com`（不用加 `/rest` 后缀，客户端自己会拼） |
+| 用户名 | 你设的 `AUTH_USERNAME`（见[部署方式](#部署方式cloudflare-git-集成workers-builds)第 4 步） |
+| 密码 | 你设的 `AUTH_PASSWORD` |
+
+不用折腾自签证书，也不用去找"允许不安全/HTTP"那个开关——Cloudflare 会像给普通网站一样给你的域名签发真实的 TLS 证书，客户端默认的"只走 HTTPS"直接就能用。如果客户端要填 API 版本号，填 `1.16.1`（或选"自动"）就行。
+
+想在配客户端之前先确认服务端本身是通的？直接用[部署方式第 7 步](#部署方式cloudflare-git-集成workers-builds)里那条 `curl .../ping.view` 检查命令就行。
+
 ## 准备工作：创建 Telegram Bot 和频道
 
 这一步对新手最容易卡住，跟 Cloudflare 完全无关，纯 Telegram 操作。做完你会拿到两个值——`TG_BOT_TOKEN` 和 `TG_CHANNEL_ID`——部署时要填进 Worker Secrets（见下面第 4 步）。
@@ -178,7 +199,7 @@ Upload 页面（导航栏里的 Upload，或者在任意 Folders 页面点"⬆ U
 - **删除歌曲**（Songs/Album/Folders 列表行上的 🗑 按钮——playlist 和搜索结果视图没有这个按钮，它们各自已经有语义不同的"从歌单移除"/什么都没有）会把这首歌从 D1 永久删除（顺带清理它在 playlist、收藏里的引用，如果这是所在专辑/艺人的最后一首歌，专辑/艺人也会一并删除），并尽力删除对应的 Telegram 消息（见上面「删除消息」bot 权限那条说明）。
 - **文件夹改名**（子文件夹旁边的 ✎ 按钮，或者当前文件夹自己面包屑那一段旁边的 ✎ 按钮）只改这一段路径本身——会更新受影响的每条 track 在 D1 里的 `source_path`，不涉及 Telegram 那边。
 - **创建空文件夹**（任意 Folders 页面里的"+ New folder"）会在一张小的 `folders` 表里登记一个路径——文件夹本来完全是从 track 的 `source_path` 推算出来的，这是唯一能让一个文件夹在还没传任何歌进去之前就存在的办法。`getFolder` 会把这两个来源合并展示。
-- **删除文件夹**（子文件夹旁边的 🗑，或者当前文件夹自己不再有任何内容时、面包屑旁边的 🗑）只会删掉这条 `folders` 登记——如果里面还有歌或者还有嵌套的子文件夹，会被拒绝并提示"Folder is not empty"，所以这个操作永远不会顺带删掉歌曲。想删歌请先用歌曲那边的删除按钮。
+- **删除文件夹**（只有 `getFolder` 判断为真的空文件夹，子文件夹旁边才会出现 🗑；当前文件夹自己不再有任何内容时，面包屑旁边也会出现）只会删掉这条 `folders` 登记——如果里面还有歌或者还有嵌套的子文件夹，会被拒绝并提示"Folder is not empty"，所以这个操作永远不会顺带删掉歌曲。想删歌请先用歌曲那边的删除按钮。
 
 **样式**：Tailwind CSS v4（通过 `@tailwindcss/vite`，不需要单独的 `postcss.config.js`），单一深色主题，手写 `.glass` 毛玻璃卡片 + 固定定位的模糊渐变"极光"背景块，没有做明暗双主题切换。
 

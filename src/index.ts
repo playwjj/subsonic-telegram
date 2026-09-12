@@ -311,12 +311,21 @@ export default {
         ]);
         const prefixLen = path ? path.length + 1 : 0;
         const dirs = new Set<string>();
+        // A dir name lands here whenever something under it goes deeper than
+        // just that one segment — a track anywhere inside it, or a nested
+        // folder registration — meaning deleteFolder would refuse it. Used
+        // so the client only offers deleting a folder that's actually empty.
+        const nonEmptyDirs = new Set<string>();
         const tracks: typeof rows = [];
         for (const row of rows) {
           const rest = (row.source_path ?? "").slice(prefixLen);
           const slashIdx = rest.indexOf("/");
           if (slashIdx === -1) tracks.push(row);
-          else dirs.add(rest.slice(0, slashIdx));
+          else {
+            const name = rest.slice(0, slashIdx);
+            dirs.add(name);
+            nonEmptyDirs.add(name);
+          }
         }
         // Merge in folders that were explicitly created empty (see
         // db/schema.sql) — same "just take the next path segment" logic,
@@ -324,7 +333,9 @@ export default {
         for (const { path: folderPath } of explicitFolders) {
           const rest = folderPath.slice(prefixLen);
           const slashIdx = rest.indexOf("/");
-          dirs.add(slashIdx === -1 ? rest : rest.slice(0, slashIdx));
+          const name = slashIdx === -1 ? rest : rest.slice(0, slashIdx);
+          dirs.add(name);
+          if (slashIdx !== -1) nonEmptyDirs.add(name);
         }
         return respond(
           subsonicSuccess(
@@ -333,7 +344,9 @@ export default {
               { path },
               {
                 lists: {
-                  dir: [...dirs].sort((a, b) => a.localeCompare(b)).map((name) => node("dir", { name })),
+                  dir: [...dirs]
+                    .sort((a, b) => a.localeCompare(b))
+                    .map((name) => node("dir", { name, empty: !nonEmptyDirs.has(name) })),
                   song: tracks.map(songNode),
                 },
               },

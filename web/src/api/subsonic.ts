@@ -249,19 +249,26 @@ export async function getMostPlayed(size: number): Promise<Song[]> {
   return body.mostPlayed.song;
 }
 
+export interface FolderDir {
+  name: string;
+  // Whether deleteFolder would actually succeed on this one — see getFolder
+  // in src/index.ts. Has nothing under it (no tracks, no nested folder).
+  empty: boolean;
+}
+
 export interface FolderListing {
   path: string;
-  dirs: string[];
+  dirs: FolderDir[];
   songs: Song[];
 }
 
 export async function getFolder(path: string): Promise<FolderListing> {
-  const body = await call<{ folder: { path: string; dir?: { name: string }[]; song?: Song[] } }>("getFolder", {
+  const body = await call<{ folder: { path: string; dir?: FolderDir[]; song?: Song[] } }>("getFolder", {
     path,
   });
   return {
     path: body.folder.path,
-    dirs: (body.folder.dir ?? []).map((d) => d.name),
+    dirs: body.folder.dir ?? [],
     songs: body.folder.song ?? [],
   };
 }
