@@ -76,7 +76,11 @@ onMounted(async () => {
 
     <section v-if="recentAlbums.length">
       <h2 class="mb-3 text-sm font-medium text-[var(--text-dim)]">Recently Added</h2>
-      <div class="flex gap-4 overflow-x-auto pb-2">
+      <!-- p-1 (not just pb-2) so hover:scale on the cards has room within this
+           scroll container's clip bounds — otherwise the scaled-up edges get
+           cut by the auto-overflow (top on every card; left only on the
+           first, since overflow-x:auto forces overflow-y:auto too). -->
+      <div class="flex gap-4 overflow-x-auto pt-1 pr-1 pb-2 pl-1">
         <RouterLink
           v-for="al in recentAlbums"
           :key="al.id"
