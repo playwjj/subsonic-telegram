@@ -36,7 +36,9 @@ function formatDuration(sec?: number): string {
   align-items: center;
   gap: 0.75rem;
   padding: 0.5rem 0;
-  border-bottom: 1px solid var(--border);
+}
+.track-row + .track-row {
+  border-top: 1px solid var(--border);
 }
 .play-btn {
   display: flex;

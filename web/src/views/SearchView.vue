@@ -147,7 +147,9 @@ ul {
 }
 li {
   padding: 0.4rem 0;
-  border-bottom: 1px solid var(--border);
+}
+li + li {
+  border-top: 1px solid var(--border);
 }
 .albums {
   display: grid;

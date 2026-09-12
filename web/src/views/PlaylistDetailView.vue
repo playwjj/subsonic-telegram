@@ -96,6 +96,9 @@ async function removePlaylist() {
   align-items: center;
   gap: 0.5rem;
 }
+.row + .row {
+  border-top: 1px solid var(--border);
+}
 .row > :first-child {
   flex: 1;
   min-width: 0;

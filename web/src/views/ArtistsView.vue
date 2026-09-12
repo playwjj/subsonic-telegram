@@ -53,7 +53,9 @@ li {
   display: flex;
   justify-content: space-between;
   padding: 0.4rem 0;
-  border-bottom: 1px solid var(--border);
+}
+li + li {
+  border-top: 1px solid var(--border);
 }
 .count {
   opacity: 0.6;
