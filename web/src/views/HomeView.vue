@@ -3,6 +3,7 @@ import { ref, onMounted } from "vue";
 import {
   getLibraryStats,
   getAlbumList2,
+  getRandomSongs,
   getRecentlyPlayed,
   getMostPlayed,
   coverArtUrl,
@@ -15,9 +16,17 @@ import TrackRow from "../components/TrackRow.vue";
 
 const stats = ref<LibraryStats | null>(null);
 const recentAlbums = ref<Album[]>([]);
+const randomSongs = ref<Song[]>([]);
 const recentlyPlayed = ref<Song[]>([]);
 const mostPlayed = ref<Song[]>([]);
 const loading = ref(true);
+const shuffling = ref(false);
+
+async function shuffle() {
+  shuffling.value = true;
+  randomSongs.value = await getRandomSongs(8);
+  shuffling.value = false;
+}
 
 function formatDuration(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
@@ -26,14 +35,16 @@ function formatDuration(totalSeconds: number): string {
 }
 
 onMounted(async () => {
-  const [s, albums, played, most] = await Promise.all([
+  const [s, albums, random, played, most] = await Promise.all([
     getLibraryStats(),
     getAlbumList2({ type: "newest", size: 10 }),
+    getRandomSongs(8),
     getRecentlyPlayed(8),
     getMostPlayed(8),
   ]);
   stats.value = s;
   recentAlbums.value = albums;
+  randomSongs.value = random;
   recentlyPlayed.value = played;
   mostPlayed.value = most;
   loading.value = false;
@@ -77,6 +88,16 @@ onMounted(async () => {
           <div class="mt-2 truncate text-sm">{{ al.name }}</div>
           <div class="truncate text-xs text-[var(--text-dim)]">{{ al.artist }}</div>
         </RouterLink>
+      </div>
+    </section>
+
+    <section v-if="randomSongs.length">
+      <div class="mb-3 flex items-center justify-between">
+        <h2 class="text-sm font-medium text-[var(--text-dim)]">Random Songs</h2>
+        <button class="text-xs" :disabled="shuffling" @click="shuffle">🔀 {{ shuffling ? "Shuffling…" : "Shuffle" }}</button>
+      </div>
+      <div class="glass p-2">
+        <TrackRow v-for="(song, i) in randomSongs" :key="song.id" :song="song" @play="playQueue(randomSongs, i)" />
       </div>
     </section>
 

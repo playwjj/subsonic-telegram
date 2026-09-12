@@ -234,6 +234,11 @@ export async function getSongs(opts: { size: number; offset: number; sort: SongS
   return { songs: body.songs.song, total: body.songs.total };
 }
 
+export async function getRandomSongs(size: number): Promise<Song[]> {
+  const body = await call<{ randomSongs: { song: Song[] } }>("getRandomSongs", { size });
+  return body.randomSongs.song;
+}
+
 export async function getRecentlyPlayed(size: number): Promise<Song[]> {
   const body = await call<{ recentlyPlayed: { song: Song[] } }>("getRecentlyPlayed", { size });
   return body.recentlyPlayed.song;
