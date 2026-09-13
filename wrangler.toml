@@ -24,9 +24,10 @@ database_id = "d51beacd-be5c-4d93-966a-29e0ef6a666e"
 #   2. Uncomment the block below (redeploy picks it up automatically)
 #   3. `npm run db:migrate:remote` to create the cache_entries table
 #
-# [[r2_buckets]]
-# binding = "CACHE_BUCKET"
-# bucket_name = "subsonic-telegram-cache"
+[[r2_buckets]]
+binding = "CACHE_BUCKET"
+bucket_name = "subsonic-telegram-cache"
+
 #
 # Cap on total cached bytes before least-recently-used entries are evicted;
 # defaults to 8GB (see DEFAULT_CACHE_MAX_BYTES in src/index.ts) if unset.
