@@ -9,7 +9,7 @@ const PAGE_SIZE = 50;
 const songs = ref<Song[]>([]);
 const total = ref(0);
 const page = ref(0);
-const sort = ref<SongSort>("title");
+const sort = ref<SongSort>("recent");
 const loading = ref(true);
 
 async function load() {
