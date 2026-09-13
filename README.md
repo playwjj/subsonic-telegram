@@ -18,6 +18,7 @@ There's no long-running server in this setup — the Worker is invoked per-reque
 ## Contents
 
 - [Architecture](#architecture)
+- [R2 read-through cache (optional)](#r2-read-through-cache-optional)
 - [Project layout](#project-layout)
 - [Implemented endpoints](#implemented-endpoints)
 - [Connecting a Subsonic client](#connecting-a-subsonic-client)
@@ -44,7 +45,29 @@ Cloudflare D1 (artists/albums/tracks/playlists metadata)
 Telegram Bot API (sendDocument to upload / getFile + file CDN to download, Range supported)
 ```
 
-The storage layer is an interface (`src/storage/types.ts`), currently with a single Telegram implementation (`src/storage/telegram.ts`). Swapping in R2/S3/etc. later just means writing a new class that implements this interface — routing and the DB schema don't need to change.
+The storage layer is an interface (`src/storage/types.ts`) with a Telegram implementation (`src/storage/telegram.ts`) as the source of truth for every file. In front of that sits an optional R2 read-through cache (`src/storage/cached.ts`, see below) — enabled only if you bind an R2 bucket; without it, every request talks to Telegram directly, same as before that cache existed.
+
+## R2 read-through cache (optional)
+
+By default, every `stream`/`download` request re-fetches the whole file from Telegram (its file CDN doesn't reliably honor Range requests, so the Worker always pulls the full file and slices out the requested bytes itself — see the comment in `src/storage/telegram.ts`). That's fine at low volume, but it means repeated plays or a listener scrubbing the seek bar repeatedly re-download the same file from Telegram, and it leans on Telegram's Bot API rate limits under concurrent listeners.
+
+Binding an R2 bucket turns this into a real cache: the first stream of a file downloads it from Telegram once and writes it to R2; every subsequent request (including Range requests from seeking) is served straight out of R2 — cheaper, faster, and no repeat Telegram calls. This is entirely optional and off by default; nothing else changes if you skip it.
+
+**To enable:**
+
+```bash
+wrangler r2 bucket create subsonic-telegram-cache
+```
+
+Then uncomment the `[[r2_buckets]]` block in `wrangler.toml` and run the schema migration once (adds the `cache_entries` accounting table — see [`db/schema.sql`](db/schema.sql)):
+
+```bash
+npm run db:migrate:remote
+```
+
+Redeploy and the cache is live. There's no size limit on the library itself — the cache only ever holds files that have actually been streamed (lazily populated, never pre-warmed), so a 50GB library with a handful of frequently-played tracks might only ever cache a few hundred MB.
+
+**Eviction**: total cache size is capped by `CACHE_MAX_BYTES` (bytes; see the `[vars]` example in `wrangler.toml`), defaulting to 8GB if unset. Whenever a new file is written to the cache, the Worker checks the running total (tracked in D1, not by listing the bucket) and — if over the cap — deletes the least-recently-served entries first until it's back under. R2's free tier includes 10GB-month of storage and unlimited egress, so an 8GB cap comfortably fits inside it.
 
 ## Project layout
 
@@ -54,7 +77,7 @@ The storage layer is an interface (`src/storage/types.ts`), currently with a sin
 | `src/auth.ts` | Subsonic auth (token or plaintext password); credentials come from the `AUTH_USERNAME`/`AUTH_PASSWORD` Worker secrets, never stored in a database. `src/md5.ts` is the accompanying dependency-free MD5 implementation (Web Crypto doesn't support MD5) |
 | `src/subsonic/` | Response building (`node.ts`/`response.ts` — one tree that serializes to either JSON or XML) and per-endpoint business logic |
 | `src/db/queries.ts` | All D1 queries |
-| `src/storage/` | Storage backend interface + the Telegram implementation |
+| `src/storage/` | Storage backend interface + the Telegram implementation, plus the optional R2 cache (`cached.ts`) |
 | `db/schema.sql` | D1 table definitions |
 | `scripts/import.ts` | Local import script: scans a local music directory, reads tags, uploads to Telegram, writes to D1 |
 | `scripts/import-m3u.ts` | Builds/updates Subsonic playlists from local `.m3u`/`.m3u8` files |

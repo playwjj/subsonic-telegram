@@ -1,4 +1,5 @@
 import type { StorageBackend } from "./types";
+import { parseRange, rangeHeaders } from "./range";
 
 interface TelegramRef {
   messageId: number;
@@ -42,17 +43,31 @@ export class TelegramStorage implements StorageBackend {
     return JSON.stringify(ref);
   }
 
-  async getFileResponse(refStr: string, rangeHeader: string | null, contentType?: string): Promise<Response> {
+  // Fetches the whole file's bytes from Telegram, bypassing Range entirely.
+  // Used both by getFileResponse below and by CachedStorage (cached.ts),
+  // which needs the full bytes once to populate its R2 cache and then slices
+  // ranges out of that cached copy itself instead of calling this again.
+  async getFileBytes(refStr: string, contentType?: string): Promise<{ bytes: Uint8Array; contentType: string }> {
     const ref = JSON.parse(refStr) as TelegramRef;
 
     const getFileRes = await fetch(this.api(`getFile?file_id=${encodeURIComponent(ref.fileId)}`));
     const getFileData = (await getFileRes.json()) as any;
     if (!getFileData.ok) {
-      return new Response(`Telegram getFile failed: ${JSON.stringify(getFileData)}`, { status: 502 });
+      throw new Error(`Telegram getFile failed: ${JSON.stringify(getFileData)}`);
     }
     const filePath = getFileData.result.file_path as string;
     const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${filePath}`;
 
+    const upstream = await fetch(fileUrl);
+    if (!upstream.ok) {
+      throw new Error(`Telegram file fetch failed: ${upstream.status}`);
+    }
+    const bytes = new Uint8Array(await upstream.arrayBuffer());
+    const resolvedType = contentType ?? upstream.headers.get("content-type") ?? "application/octet-stream";
+    return { bytes, contentType: resolvedType };
+  }
+
+  async getFileResponse(refStr: string, rangeHeader: string | null, contentType?: string): Promise<Response> {
     // Telegram's file CDN doesn't reliably honor Range requests -- it can
     // silently ignore the header and return the whole file with a 200. If we
     // just forwarded that through, a player asking for bytes at some offset
@@ -60,30 +75,18 @@ export class TelegramStorage implements StorageBackend {
     // range it asked for, producing misaligned/unparsable audio. So we always
     // fetch the full file ourselves and slice out the requested range,
     // never depending on Telegram to do it correctly.
-    const upstream = await fetch(fileUrl);
-    if (!upstream.ok) {
-      return new Response(`Telegram file fetch failed: ${upstream.status}`, { status: 502 });
-    }
-    const body = new Uint8Array(await upstream.arrayBuffer());
-    const total = body.byteLength;
-    const resolvedType = contentType ?? upstream.headers.get("content-type") ?? "application/octet-stream";
-
-    const outHeaders = new Headers();
-    outHeaders.set("content-type", resolvedType);
-    outHeaders.set("accept-ranges", "bytes");
-
-    const range = rangeHeader ? /^bytes=(\d*)-(\d*)$/.exec(rangeHeader) : null;
-    if (range && (range[1] || range[2])) {
-      const start = range[1] ? Number(range[1]) : total - Number(range[2]);
-      const end = range[1] && range[2] ? Math.min(Number(range[2]), total - 1) : total - 1;
-      const slice = body.slice(start, end + 1);
-      outHeaders.set("content-length", String(slice.byteLength));
-      outHeaders.set("content-range", `bytes ${start}-${end}/${total}`);
-      return new Response(slice, { status: 206, headers: outHeaders });
+    let bytes: Uint8Array;
+    let resolvedType: string;
+    try {
+      ({ bytes, contentType: resolvedType } = await this.getFileBytes(refStr, contentType));
+    } catch (err) {
+      return new Response(err instanceof Error ? err.message : String(err), { status: 502 });
     }
 
-    outHeaders.set("content-length", String(total));
-    return new Response(body, { status: 200, headers: outHeaders });
+    const range = parseRange(bytes.byteLength, rangeHeader);
+    const body = range ? bytes.slice(range.start, range.end + 1) : bytes;
+    const headers = rangeHeaders(resolvedType, bytes.byteLength, range);
+    return new Response(body, { status: range ? 206 : 200, headers });
   }
 
   // Requires the bot to hold the channel's "Delete messages" admin right.

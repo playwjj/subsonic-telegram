@@ -83,3 +83,15 @@ CREATE TABLE IF NOT EXISTS folders (
   path       TEXT PRIMARY KEY,
   created_at INTEGER NOT NULL
 );
+
+-- Accounting for the optional R2 read-through cache (src/storage/cached.ts).
+-- Only populated when the CACHE_BUCKET binding is configured; harmless
+-- empty table otherwise. `key` is the sha256 hex of the file_ref/cover_ref
+-- being cached, doubling as the R2 object key.
+CREATE TABLE IF NOT EXISTS cache_entries (
+  key           TEXT PRIMARY KEY,
+  size          INTEGER NOT NULL,
+  content_type  TEXT NOT NULL,
+  last_accessed INTEGER NOT NULL  -- unix seconds; eviction removes oldest first
+);
+CREATE INDEX IF NOT EXISTS idx_cache_entries_last_accessed ON cache_entries(last_accessed);

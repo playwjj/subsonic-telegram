@@ -8,3 +8,10 @@ export interface StorageBackend {
   getFileResponse(ref: string, rangeHeader: string | null, contentType?: string): Promise<Response>;
   deleteFile(ref: string): Promise<void>;
 }
+
+// A backend that can also hand back a whole file's raw bytes in one shot.
+// CachedStorage (cached.ts) needs this from whatever backend it wraps, to
+// populate its cache on a miss — TelegramStorage implements it.
+export interface SourceStorage extends StorageBackend {
+  getFileBytes(ref: string, contentType?: string): Promise<{ bytes: Uint8Array; contentType: string }>;
+}

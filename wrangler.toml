@@ -16,3 +16,19 @@ database_id = "d51beacd-be5c-4d93-966a-29e0ef6a666e"
 # Set via `wrangler secret put TG_BOT_TOKEN` / `TG_CHANNEL_ID` / `AUTH_USERNAME`
 # / `AUTH_PASSWORD` before deploying. For local dev, put them in .dev.vars
 # (gitignored).
+
+# Optional R2 read-through cache for streamed audio (see src/storage/cached.ts).
+# Without this binding, every stream/download request re-fetches the full
+# file from Telegram, as before. To enable it:
+#   1. `wrangler r2 bucket create subsonic-telegram-cache`
+#   2. Uncomment the block below (redeploy picks it up automatically)
+#   3. `npm run db:migrate:remote` to create the cache_entries table
+#
+# [[r2_buckets]]
+# binding = "CACHE_BUCKET"
+# bucket_name = "subsonic-telegram-cache"
+#
+# Cap on total cached bytes before least-recently-used entries are evicted;
+# defaults to 8GB (see DEFAULT_CACHE_MAX_BYTES in src/index.ts) if unset.
+# [vars]
+# CACHE_MAX_BYTES = "8589934592"

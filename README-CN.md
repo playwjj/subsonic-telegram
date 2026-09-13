@@ -18,6 +18,7 @@
 ## 目录
 
 - [架构](#架构)
+- [R2 缓存（可选）](#r2-缓存可选)
 - [目录结构](#目录结构)
 - [已实现的端点](#已实现的端点)
 - [准备工作：创建 Telegram Bot 和频道](#准备工作创建-telegram-bot-和频道)
@@ -43,7 +44,29 @@ Cloudflare D1（artists/albums/tracks/playlists 元数据）
 Telegram Bot API（sendDocument 上传 / getFile+文件CDN 下载，支持 Range）
 ```
 
-存储层是一个接口（`src/storage/types.ts`），当前只有 Telegram 实现（`src/storage/telegram.ts`）。以后想换成 R2/S3 之类，只需要新写一个实现这个接口的 class，路由和数据库 schema 都不用动。
+存储层是一个接口（`src/storage/types.ts`），Telegram 实现（`src/storage/telegram.ts`）是每个文件的最终来源。前面可以挂一层可选的 R2 缓存（`src/storage/cached.ts`，见下文）——只有绑定了 R2 bucket 才会启用；不绑定的话，每次请求都直接打 Telegram，跟没有这层缓存时完全一样。
+
+## R2 缓存（可选）
+
+默认情况下，每次 `stream`/`download` 请求都会重新从 Telegram 下载整个文件（Telegram 的文件 CDN 不可靠地支持 Range 请求，所以 Worker 总是拉完整文件后自己切片返回——详见 `src/storage/telegram.ts` 里的注释）。低并发下这没什么问题，但意味着同一首歌被反复播放，或者用户来回拖进度条，都会重复从 Telegram 下载同一个文件，而且会更容易撞到 Telegram Bot API 的限流。
+
+绑定一个 R2 bucket 之后，这就变成了真正的缓存：第一次播放某个文件时从 Telegram 下载一次并写入 R2；之后所有请求（包括 seek 产生的 Range 请求）都直接从 R2 读取——更快、更省，也不会重复调用 Telegram。这是完全可选、默认关闭的功能，不启用的话其它行为不受任何影响。
+
+**启用方法：**
+
+```bash
+wrangler r2 bucket create subsonic-telegram-cache
+```
+
+然后取消 `wrangler.toml` 里 `[[r2_buckets]]` 那一段的注释，并跑一次 schema migration（新增 `cache_entries` 计数表，见 [`db/schema.sql`](db/schema.sql)）：
+
+```bash
+npm run db:migrate:remote
+```
+
+重新部署后缓存就生效了。这套方案对歌库总大小没有限制——缓存只会保存真正被播放过的文件（按需懒加载，不会预热），所以哪怕歌库有 50GB，只要常听的就那么几十首，实际缓存可能只有几百 MB。
+
+**清除机制**：缓存总大小由 `CACHE_MAX_BYTES`（字节数，见 `wrangler.toml` 里 `[vars]` 的示例）限制，不设置的话默认 8GB。每次往缓存写入新文件时，Worker 都会检查当前总量（记在 D1 里，不用去遍历整个 bucket），超出上限就按最久未被访问的顺序依次删除，直到降回上限以内。R2 免费额度本身就有 10GB-月的存储和无限出站流量，8GB 的上限完全在免费额度内。
 
 ## 目录结构
 
@@ -53,7 +76,7 @@ Telegram Bot API（sendDocument 上传 / getFile+文件CDN 下载，支持 Range
 | `src/auth.ts` | Subsonic 鉴权（token 或明文密码，账号密码来自 `AUTH_USERNAME`/`AUTH_PASSWORD` 这两个 Worker secrets，不落库），`src/md5.ts` 是配套的无依赖 MD5 实现（Web Crypto 不支持 MD5） |
 | `src/subsonic/` | 响应构建（`node.ts`/`response.ts`，同一套树可以序列化成 JSON 或 XML）、各端点的业务逻辑 |
 | `src/db/queries.ts` | 所有 D1 查询 |
-| `src/storage/` | 存储后端接口 + Telegram 实现 |
+| `src/storage/` | 存储后端接口 + Telegram 实现，外加可选的 R2 缓存（`cached.ts`） |
 | `db/schema.sql` | D1 表结构 |
 | `scripts/import.ts` | 本地导入脚本：扫描本地音乐目录，读 tag，传 Telegram，写 D1 |
 | `scripts/import-m3u.ts` | 从本地 `.m3u`/`.m3u8` 文件建/更新 Subsonic playlist |

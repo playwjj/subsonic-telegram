@@ -7,11 +7,17 @@ import * as browsing from "./subsonic/browsing";
 import * as media from "./subsonic/media";
 import * as q from "./db/queries";
 import { TelegramStorage } from "./storage/telegram";
+import { CachedStorage } from "./storage/cached";
+import type { StorageBackend } from "./storage/types";
 
 const ERR = {
   MISSING_PARAM: 10,
   NOT_FOUND: 70,
 };
+
+// Default cap for the optional R2 read-through cache when CACHE_BUCKET is
+// bound but CACHE_MAX_BYTES isn't set. See "R2 read-through cache" in README.
+const DEFAULT_CACHE_MAX_BYTES = 8 * 1024 * 1024 * 1024;
 
 // Same ceiling scripts/import.ts enforces (its MAX_FILE_BYTES): a file that
 // uploads fine past Telegram's 50MB sendDocument limit could still never be
@@ -30,7 +36,7 @@ function sanitizeFolderPath(input: string): string {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     // wrangler.toml scopes run_worker_first to "/rest/*", so this fetch()
     // only ever runs for API requests — everything else (including "/") is
@@ -56,7 +62,16 @@ export default {
       return respond(subsonicSuccess(node("license", { valid: true })), format);
     }
 
-    const storage = new TelegramStorage(env.TG_BOT_TOKEN, env.TG_CHANNEL_ID);
+    const telegram = new TelegramStorage(env.TG_BOT_TOKEN, env.TG_CHANNEL_ID);
+    const storage: StorageBackend = env.CACHE_BUCKET
+      ? new CachedStorage(
+          telegram,
+          env.CACHE_BUCKET,
+          env.DB,
+          env.CACHE_MAX_BYTES ? Number(env.CACHE_MAX_BYTES) : DEFAULT_CACHE_MAX_BYTES,
+          ctx,
+        )
+      : telegram;
 
     switch (endpoint) {
       case "getMusicFolders":
