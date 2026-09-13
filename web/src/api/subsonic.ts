@@ -249,6 +249,10 @@ export async function getMostPlayed(size: number): Promise<Song[]> {
   return body.mostPlayed.song;
 }
 
+export async function scrobble(id: string): Promise<void> {
+  await call("scrobble", { id });
+}
+
 export interface FolderDir {
   name: string;
   // Whether deleteFolder would actually succeed on this one — see getFolder

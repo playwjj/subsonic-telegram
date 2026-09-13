@@ -2,9 +2,14 @@
 // persisted — the queue is ephemeral, same as any Subsonic client's "now
 // playing" list.
 import { computed, reactive } from "vue";
-import { streamUrl, type Song } from "../api/subsonic";
+import { scrobble, streamUrl, type Song } from "../api/subsonic";
 
 const audio = new Audio();
+
+// Record a play only once playback has stuck around a bit — skips within
+// the first few seconds shouldn't count toward play history/stats.
+const SCROBBLE_DELAY_MS = 5000;
+let scrobbleTimer: ReturnType<typeof setTimeout> | undefined;
 
 const state = reactive({
   queue: [] as Song[],
@@ -31,10 +36,14 @@ audio.addEventListener("ended", () => {
 });
 
 function loadCurrent(): void {
+  clearTimeout(scrobbleTimer);
   const track = state.queue[state.currentIndex];
   if (!track) return;
   audio.src = streamUrl(track.id);
   void audio.play();
+  scrobbleTimer = setTimeout(() => {
+    void scrobble(track.id).catch(() => {});
+  }, SCROBBLE_DELAY_MS);
 }
 
 export function playQueue(tracks: Song[], startIndex = 0): void {
