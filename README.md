@@ -8,6 +8,8 @@ There's no long-running server in this setup — the Worker is invoked per-reque
 
 **Current limitation**: a single audio file must be under 20MB (a hard limit of the Telegram Bot API's `getFile`); larger files are skipped during import. If larger files (e.g. lossless albums) need to be supported down the line, chunking or switching to MTProto/another storage backend would be the way to go.
 
+![Web UI screenshot](docs/screenshot.png)
+
 ## Requirements
 
 - A Telegram account (to create a bot and a private channel — see [Prerequisite](#prerequisite-create-a-telegram-bot-and-channel) below)

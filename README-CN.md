@@ -8,6 +8,8 @@
 
 **当前限制**：单个音乐文件不超过 20MB（Telegram Bot API `getFile` 的硬限制），超过的文件导入时会被跳过。以后如果需要支持更大文件（比如无损专辑),再考虑分片或换用 MTProto/其它存储后端。
 
+![Web UI 截图](docs/screenshot.png)
+
 ## 前置要求
 
 - 一个 Telegram 账号（用来建 bot 和私有频道，见下面[准备工作](#准备工作创建-telegram-bot-和频道)）
