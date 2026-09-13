@@ -31,7 +31,7 @@ async function shuffle() {
 function formatDuration(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.round((totalSeconds % 3600) / 60);
-  return hours > 0 ? `${hours} 小时 ${minutes} 分` : `${minutes} 分钟`;
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
 onMounted(async () => {
