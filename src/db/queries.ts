@@ -354,6 +354,23 @@ export async function getRandomStarredTracks(
   return results;
 }
 
+// Same shape as getRandomSongs, restricted to the most recently added tracks
+// (by created_at) — used to blend a share of newly added music into the
+// "random songs" widget/endpoint.
+export async function getRandomRecentTracks(
+  db: D1Database,
+  opts: { size: number; genre?: string; fromYear?: number; toYear?: number; excludeIds?: string[]; pool: number },
+): Promise<TrackRow[]> {
+  const { conditions, params } = randomSongsFilter(opts);
+  conditions.push(`t.id IN (SELECT id FROM tracks ORDER BY created_at DESC LIMIT ?)`);
+  params.push(opts.pool, opts.size);
+  const { results } = await db
+    .prepare(`${TRACK_SELECT} WHERE ${conditions.join(" AND ")} ORDER BY RANDOM() LIMIT ?`)
+    .bind(...params)
+    .all<TrackRow>();
+  return results;
+}
+
 export async function scrobble(db: D1Database, trackId: string, playedAt: number): Promise<void> {
   await db
     .prepare(`UPDATE tracks SET play_count = play_count + 1, last_played = ? WHERE id = ?`)

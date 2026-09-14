@@ -40,6 +40,12 @@ function sanitizeFolderPath(input: string): string {
 // discovery of the rest of the library.
 const RANDOM_SONGS_FAVORITE_RATIO = 0.3;
 
+// Share of getRandomSongs made up of recently added tracks (drawn from the
+// most recently added RANDOM_SONGS_RECENT_POOL tracks) — surfaces new music
+// without crowding out favorites/discovery.
+const RANDOM_SONGS_RECENT_RATIO = 0.3;
+const RANDOM_SONGS_RECENT_POOL = 100;
+
 function shuffle<T>(items: T[]): T[] {
   const result = [...items];
   for (let i = result.length - 1; i > 0; i--) {
@@ -263,16 +269,30 @@ export default {
         const favorites = favoriteQuota
           ? await q.getRandomStarredTracks(env.DB, auth.username, { size: favoriteQuota, genre, fromYear, toYear })
           : [];
-        const rest = size - favorites.length
-          ? await q.getRandomSongs(env.DB, {
-              size: size - favorites.length,
+
+        const recentQuota = Math.round(size * RANDOM_SONGS_RECENT_RATIO);
+        const recent = recentQuota
+          ? await q.getRandomRecentTracks(env.DB, {
+              size: recentQuota,
               genre,
               fromYear,
               toYear,
               excludeIds: favorites.map((t) => t.id),
+              pool: RANDOM_SONGS_RECENT_POOL,
             })
           : [];
-        const tracks = shuffle([...favorites, ...rest]);
+
+        const picked = [...favorites, ...recent];
+        const rest = size - picked.length
+          ? await q.getRandomSongs(env.DB, {
+              size: size - picked.length,
+              genre,
+              fromYear,
+              toYear,
+              excludeIds: picked.map((t) => t.id),
+            })
+          : [];
+        const tracks = shuffle([...picked, ...rest]);
         const starred = await q.getStarredIds(env.DB, auth.username);
         return respond(
           subsonicSuccess(
