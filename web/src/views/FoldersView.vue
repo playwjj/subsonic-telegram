@@ -13,6 +13,8 @@ import {
 } from "../api/subsonic";
 import { playQueue } from "../stores/player";
 import TrackRow from "../components/TrackRow.vue";
+import Modal from "../components/Modal.vue";
+import UploadForm from "../components/UploadForm.vue";
 
 const router = useRouter();
 
@@ -133,6 +135,15 @@ async function handleDelete(song: Song) {
   await deleteTrack(song.id);
   songs.value = songs.value.filter((s) => s.id !== song.id);
 }
+
+const showUploadModal = ref(false);
+const uploadModalTitle = computed(() => `Upload to ${currentPath.value || "Folders"}`);
+
+function handleUploaded() {
+  // The new track may land in this folder (or a subfolder of it) — refresh
+  // so it shows up without the user having to leave and re-enter.
+  load(currentPath.value);
+}
 </script>
 
 <template>
@@ -168,12 +179,12 @@ async function handleDelete(song: Song) {
     </div>
 
     <div class="mb-4 flex flex-wrap items-center gap-2 text-sm">
-      <RouterLink
-        :to="{ name: 'upload', query: { folder: currentPath } }"
+      <button
         class="rounded-lg border border-[var(--border)] px-3 py-1.5 hover:bg-[var(--surface-hover)]"
+        @click="showUploadModal = true"
       >
         ⬆ Upload here
-      </RouterLink>
+      </button>
       <button v-if="!creatingFolder" @click="startCreateFolder">+ New folder</button>
       <input
         v-else
@@ -221,6 +232,10 @@ async function handleDelete(song: Song) {
         @delete="handleDelete(song)"
       />
     </div>
+
+    <Modal v-if="showUploadModal" :title="uploadModalTitle" @close="showUploadModal = false">
+      <UploadForm :preset-folder="currentPath" @uploaded="handleUploaded" />
+    </Modal>
   </div>
 </template>
 
