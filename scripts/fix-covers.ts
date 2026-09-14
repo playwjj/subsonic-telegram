@@ -90,6 +90,12 @@ const STATE_FILE = path.join(process.cwd(), ".cover-fix-state.json");
 const FALLBACK_COVER_PATH = path.join(process.cwd(), "docs/music-cover.jpg");
 const FALLBACK_COVER_REF_FILE = path.join(process.cwd(), ".cover-fallback-ref.json");
 
+// Same idea, per artist: once an artist's photo has been uploaded to
+// Telegram for one track, every other track that falls back to it reuses
+// that ref instead of re-downloading from Deezer and re-uploading a
+// duplicate copy of the same picture.
+const ARTIST_PHOTO_REF_FILE = path.join(process.cwd(), ".artist-photo-refs.json");
+
 // iTunes has separate storefronts per country and a release only shows up
 // in the ones it was distributed to — try a handful likely to cover a
 // mixed CN/JP/Western library before giving up.
@@ -120,6 +126,21 @@ async function loadState(): Promise<State> {
 
 async function saveState(state: State): Promise<void> {
   await writeFile(STATE_FILE, JSON.stringify(state, null, 2));
+}
+
+// artist name -> Telegram ref of that artist's uploaded photo.
+type ArtistPhotoRefs = Record<string, string>;
+
+async function loadArtistPhotoRefs(): Promise<ArtistPhotoRefs> {
+  try {
+    return JSON.parse(await readFile(ARTIST_PHOTO_REF_FILE, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+async function saveArtistPhotoRefs(refs: ArtistPhotoRefs): Promise<void> {
+  await writeFile(ARTIST_PHOTO_REF_FILE, JSON.stringify(refs, null, 2));
 }
 
 async function d1<T = any>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -368,22 +389,32 @@ async function searchArtistPhoto(artist: string): Promise<string | null> {
   }
 }
 
-// No exact song match -- try a photo of the artist first, falling back to
+// "cached-photo" needs no download/upload at all (ref is already a real
+// Telegram message this artist's photo was uploaded to before); "new-photo"
+// is a fresh Deezer URL that, once uploaded, should be cached under
+// `artist` for next time; "song" is a one-off per-song URL that never gets
+// cached (it's specific to that song, not reusable for the artist).
+type LooseMatch =
+  | { kind: "cached-photo"; ref: string; label: string }
+  | { kind: "new-photo"; url: string; artist: string; label: string }
+  | { kind: "song"; url: string; label: string };
+
+// No exact song match -- try a photo of the artist first (reusing an
+// already-uploaded one if this artist has come up before), falling back to
 // their top iTunes hit's album art as a last resort "related, not exact"
 // cover rather than leaving the track with nothing. Only used when
 // --loose-fallback is passed, since even the artist-photo tier can't
 // promise this is really the right song.
-async function searchLooseArtwork(artist: string, title: string): Promise<string | null> {
+async function searchLooseArtwork(artist: string, title: string, photoRefs: ArtistPhotoRefs): Promise<LooseMatch | null> {
+  const cachedRef = photoRefs[normalize(artist)];
+  if (cachedRef) return { kind: "cached-photo", ref: cachedRef, label: `a photo of ${artist} (reused)` };
+
   const photo = await searchArtistPhoto(artist);
-  if (photo) {
-    console.log(`  loose match: using a photo of ${artist} (exact title "${title}" not found)`);
-    return photo;
-  }
+  if (photo) return { kind: "new-photo", url: photo, artist, label: `a photo of ${artist}` };
 
   const hit = await searchItunes<ItunesSong>(artist, "song", (r) => textMatches(artist, r.artistName));
   if (!hit) return null;
-  console.log(`  loose match: using artwork from "${hit.trackName}" (exact title "${title}" not found)`);
-  return artworkUrl(hit);
+  return { kind: "song", url: artworkUrl(hit), label: `artwork from "${hit.trackName}"` };
 }
 
 const UPLOAD_RETRIES = 3;
@@ -507,21 +538,18 @@ async function fetchOutstandingTracks(albumId: string, state: State): Promise<Tr
 // (not bounded by --limit, which only paces how many albums are visited) —
 // track-level state still makes re-running cheap, since already-handled
 // tracks are skipped without hitting iTunes again.
-async function fixTracks(artistName: string, tracks: Track[], state: State): Promise<number> {
+async function fixTracks(artistName: string, tracks: Track[], state: State, photoRefs: ArtistPhotoRefs): Promise<number> {
   let fixedCount = 0;
 
   for (const track of tracks) {
     console.log(`  - ${track.title}`);
     const cleanTitle = cleanTrackTitle(track.title, artistName);
     try {
-      let url = await searchSongArtwork(artistName, cleanTitle);
-      let status: EntryStatus = "fixed";
-      if (!url && LOOSE_FALLBACK) {
-        url = await searchLooseArtwork(artistName, cleanTitle);
-        status = "fixed-loose";
-      }
+      const exactUrl = await searchSongArtwork(artistName, cleanTitle);
+      const loose = !exactUrl && LOOSE_FALLBACK ? await searchLooseArtwork(artistName, cleanTitle, photoRefs) : null;
+      const status: EntryStatus = exactUrl ? "fixed" : "fixed-loose";
 
-      if (!url) {
+      if (!exactUrl && !loose) {
         if (!FALLBACK_COVER) {
           console.log("    no confident match found, skipping");
           state[`track:${track.id}`] = "no-match";
@@ -544,15 +572,38 @@ async function fixTracks(artistName: string, tracks: Track[], state: State): Pro
         continue;
       }
 
+      // A cached artist photo already has a real Telegram ref -- reuse it
+      // directly, no download/upload needed at all.
+      if (loose?.kind === "cached-photo") {
+        console.log(`    found: ${loose.label}`);
+        if (!DRY_RUN) {
+          await d1(`UPDATE tracks SET cover_ref = ? WHERE id = ?`, [loose.ref, track.id]);
+          if (track.cover_ref && track.cover_ref !== loose.ref) {
+            const old = JSON.parse(track.cover_ref) as { messageId: number };
+            await telegramDeleteMessage(old.messageId);
+          }
+        }
+        state[`track:${track.id}`] = status;
+        fixedCount++;
+        continue;
+      }
+
+      const url = exactUrl ?? (loose as { url: string }).url;
+      const label = exactUrl ? url : (loose as { label: string }).label;
       if (DRY_RUN) {
-        console.log(`    found (${status}): ${url}`);
+        console.log(`    found (${status}): ${label}`);
         state[`track:${track.id}`] = status;
         fixedCount++;
         continue;
       }
 
       const ref = await uploadArtwork(url, track.id, track.cover_ref);
-      await d1(`UPDATE tracks SET cover_ref = ? WHERE id = ?`, [ref, track.id]);
+      // A freshly-uploaded artist photo (as opposed to a one-off song
+      // cover) gets cached so the next track by this artist reuses it.
+      if (loose?.kind === "new-photo") {
+        photoRefs[normalize(loose.artist)] = ref;
+        await saveArtistPhotoRefs(photoRefs);
+      }
       console.log(`    updated track cover_ref (${status})`);
       state[`track:${track.id}`] = status;
       fixedCount++;
@@ -567,6 +618,7 @@ async function fixTracks(artistName: string, tracks: Track[], state: State): Pro
 
 async function main() {
   const state = await loadState();
+  const photoRefs = await loadArtistPhotoRefs();
   if (RETRY_FAILED) {
     for (const key of Object.keys(state)) {
       if (state[key] === "no-match" || state[key] === "error") delete state[key];
@@ -625,7 +677,7 @@ async function main() {
       }
 
       const tracks = outstanding ?? (await fetchOutstandingTracks(album.id, state));
-      const fixedTracks = await fixTracks(album.artist_name, tracks, state);
+      const fixedTracks = await fixTracks(album.artist_name, tracks, state, photoRefs);
       tracksFixed += fixedTracks;
       if (fixedTracks === 0 && tracks.length > 0) noMatch++;
     } catch (err) {

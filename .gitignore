@@ -8,5 +8,6 @@ dist/
 .import-state.json
 .cover-fix-state.json
 .cover-fallback-ref.json
+.artist-photo-refs.json
 *.log
 .DS_Store
