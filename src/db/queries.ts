@@ -334,11 +334,12 @@ export async function starItem(
   itemType: StarredItemType,
   itemId: string,
 ): Promise<void> {
+  // INSERT OR IGNORE (rather than ON CONFLICT(...) DO NOTHING) doesn't need
+  // to name the exact constraint it's deduplicating against, so it still
+  // works if the deployed starred table predates the composite primary key
+  // in db/schema.sql.
   await db
-    .prepare(
-      `INSERT INTO starred (owner, item_type, item_id, starred_at) VALUES (?, ?, ?, ?)
-       ON CONFLICT(owner, item_type, item_id) DO NOTHING`,
-    )
+    .prepare(`INSERT OR IGNORE INTO starred (owner, item_type, item_id, starred_at) VALUES (?, ?, ?, ?)`)
     .bind(owner, itemType, itemId, Math.floor(Date.now() / 1000))
     .run();
 }

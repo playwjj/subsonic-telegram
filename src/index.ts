@@ -73,7 +73,8 @@ export default {
         )
       : telegram;
 
-    switch (endpoint) {
+    try {
+      switch (endpoint) {
       case "getMusicFolders":
         return respond(subsonicSuccess(browsing.getMusicFolders()), format);
 
@@ -531,6 +532,15 @@ export default {
 
       default:
         return respond(subsonicError(0, `Unsupported endpoint: ${endpoint}`), format);
+      }
+    } catch (err) {
+      // Surface the real D1/storage error as a Subsonic error response
+      // instead of letting it propagate as an uncaught exception — Workers
+      // then returns a bare, non-JSON 500 that every client (this web UI,
+      // Amperfy, etc.) can only see as "no response".
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`Unhandled error in ${endpoint}: ${message}`);
+      return respond(subsonicError(0, `Server error in ${endpoint}: ${message}`), format);
     }
   },
 } satisfies ExportedHandler<Env>;
