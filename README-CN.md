@@ -86,7 +86,7 @@ npm run db:migrate:remote
 
 ## 已实现的端点
 
-`ping` `getLicense` `getMusicFolders` `getIndexes` `getArtists` `getArtist` `getAlbum` `getSong` `getAlbumList2` `getGenres` `search3` `stream` `download` `getCoverArt` `getPlaylists` `getPlaylist` `createPlaylist` `updatePlaylist` `deletePlaylist` `getRandomSongs` `scrobble` `star` `unstar` `getStarred` `getStarred2` `setRating` `getLyrics` `getOpenSubsonicExtensions` `getLyricsBySongId`
+`ping` `getLicense` `getMusicFolders` `getIndexes` `getArtists` `getArtist` `getAlbum` `getSong` `getAlbumList2` `getGenres` `search3` `stream` `download` `getCoverArt` `getPlaylists` `getPlaylist` `createPlaylist` `updatePlaylist` `deletePlaylist` `getRandomSongs` `scrobble` `star` `unstar` `getStarred` `getStarred2` `setRating` `getLyrics` `getOpenSubsonicExtensions` `getLyricsBySongId` `getPlayQueue` `savePlayQueue` `getTopSongs` `getSimilarSongs2`
 
 `scrobble`（`submission=true`，默认值）会给对应 track 的 `play_count` 加一、更新 `last_played`；`submission=false`（"正在播放"通知）目前直接忽略，不做处理。`star`/`unstar` 接受 `id`（曲目）/`albumId`/`artistId` 中的任意组合；`getStarred`/`getStarred2` 返回同一份收藏数据，只是外层标签不同（`starred` vs `starred2`），走的都是这个项目原生的 ID3 结构。`setRating` 给曲目打 1–5 星的 `userRating`（`rating=0` 清除评分）；评分只针对单曲，没有专辑/艺人维度的评分。
 
@@ -95,6 +95,10 @@ npm run db:migrate:remote
 `getLyrics` 按客户端传来的 `artist`+`title` 去 [LRCLIB](https://lrclib.net)（免费、不用注册的歌词库）做精确匹配，取纯文本歌词。有个小的清洗重试兜底（依然是精确匹配，不是模糊搜索）：直接匹配没中的话，会去掉标题里的装饰性后缀（`情火（DJ）` → `情火`、`演员 (男女和声氛围版)` → `演员`），多个艺人堆在一个字段里的话只取第一个（`张紫宁、李鑫一` → `张紫宁`），再试一次。实测在这个项目自己的曲库上，这个兜底也就多救回几首——大部分找不到是 LRCLIB 真的没收录这首歌，查询逻辑再怎么聪明也没用（它的覆盖偏国际化/主流曲目，华语流行/粤语老歌的冷门曲目、DJ 改编版、网络歌手翻唱，覆盖率参差不齐）。除此之外没有更进一步的模糊/仅按标题搜索——标签混乱的情况下（比如合辑文件夹里 artist 字段错了，或者干脆是 "Various Artists"），仅按标题搜往往会匹配到"看起来很对但其实是错的"结果（翻唱、live 版、同名歌），所以真没精确匹配上就直接返回空歌词，不做猜测。LRCLIB 自带的同步歌词（LRC 格式）在这里会被拍平成纯文本，因为经典版 `getLyrics` 响应里没有时间轴字段——同步版见下面的 `getLyricsBySongId`。自带 Web UI 的播放条上有个 🎤 按钮，点了才会去拉歌词并弹窗显示（不是每切一首歌就自动拉一次），见下面 [Web UI](#web-ui)。
 
 `getOpenSubsonicExtensions` 声明支持 [OpenSubsonic](https://opensubsonic.netlify.app) 的 `songLyrics` 扩展，`getLyricsBySongId` 是它按 `id` 查的版本，对应 `getLyrics`——有些客户端（实测 **Amperfy**）会先查这个扩展有没有声明支持，没声明就直接跳过歌词功能、根本不会去调经典版 `getLyrics`，所以哪怕某首歌确实有歌词，客户端上也可能一个字都不显示。跟 `getLyrics` 不同的是，这个端点在 LRCLIB 有同步（LRC）歌词时能返回真正的逐行时间轴（`<line start="12340">...`），这样 Amperfy 这类客户端才能做出滚动歌词/卡拉OK 效果，而不是一坨纯文本；LRCLIB 只有纯文本歌词时就退化成不带时间轴的逐行文本。底层用的是跟 `getLyrics` 同一套 LRCLIB 查询逻辑（含同样的清洗重试兜底）——一个能找到，另一个也能找到。如果加了这个之后某个客户端里歌词还是不出来，大概率是它之前就把"这台服务器支持不支持 `songLyrics`"这个判断结果缓存成了 `false`（在这个端点上线之前问的），重启一下 App 或者强制刷新/重新同步一次库就行。
+
+`getPlayQueue`/`savePlayQueue` 在一张小表 `play_queue` 里存一份播放队列（单用户服务器，本来就只有一份，不是每个 session 一份历史记录）：队列里的曲目 id 列表、当前播的是哪首、播放进度（毫秒）。有了这个，客户端就能跨设备/跨会话续播——手机上听着，过会儿在网页版打开还是同一个队列、同一个进度。`savePlayQueue` 接受重复的 `id` 参数表示整个队列，另加 `current`/`position`；如果还没存过，`getPlayQueue` 就只返回一个空的 `<playQueue username="…"/>`，没有任何曲目。
+
+`getTopSongs`/`getSimilarSongs2` 官方实现一般是靠 Last.fm 撑着（艺人简介、真正的"相似艺人"关系图），为了这两个接口专门去接一个外部服务、管一个 API key 不太划算，所以两个都是用 D1 里已有的数据凑出来的近似版本。`getTopSongs` 接的是艺人**名字**（经典版 Subsonic 协议的历史遗留，那会儿还没有 ID3 浏览这套），按 `play_count` 排序返回这个艺人的曲目。`getSimilarSongs2` 没有真正的"相似艺人"关系图可用，就把这个艺人自己的其他曲目（60%，对应 `SIMILAR_SONGS_ARTIST_RATIO`）跟其他艺人里流派跟它最常见流派一致的随机曲目（剩下的部分）混在一起——跟 `getRandomSongs` 混入收藏/最近添加是同一套"混几个相关信号"的思路，只是换了个信号源。
 
 **客户端兼容性备注**：部分 Subsonic 客户端（实测 Amperfy）在真正调用 API 之前会先探测裸的服务器地址 `/`，把非 2xx 响应当成"服务器不存在"，导致登录直接报 404。现在 `/`（连同其它非 `/rest/*` 路径）由 Web UI 的静态资源应答，天然是 `200`，这个兼容问题顺带解决了，见下面 [Web UI](#web-ui)。
 

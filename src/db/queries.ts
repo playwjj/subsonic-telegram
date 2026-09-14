@@ -544,6 +544,95 @@ export async function getMostPlayed(db: D1Database, limit: number): Promise<Trac
   return results;
 }
 
+// getTopSongs takes an artist *name*, not id (that's the classic Subsonic
+// spec — it predates ID3 browsing), so this matches case-insensitively
+// rather than joining on artist_id.
+export async function getTopSongsByArtistName(db: D1Database, artistName: string, limit: number): Promise<TrackRow[]> {
+  const { results } = await db
+    .prepare(`${TRACK_SELECT} WHERE ar.name = ? COLLATE NOCASE ORDER BY t.play_count DESC LIMIT ?`)
+    .bind(artistName, limit)
+    .all<TrackRow>();
+  return results;
+}
+
+// There's no "similar artists" graph here (that's normally sourced from
+// Last.fm) — getSimilarSongs2 approximates it locally: mostly the artist's
+// own other tracks, blended with tracks from other artists sharing their
+// most common genre, the same "blend a few related signals" approach
+// getRandomSongs already uses.
+export async function getArtistPrimaryGenre(db: D1Database, artistId: string): Promise<string | null> {
+  const row = await db
+    .prepare(
+      `SELECT genre FROM albums WHERE artist_id = ? AND genre IS NOT NULL GROUP BY genre ORDER BY COUNT(*) DESC LIMIT 1`,
+    )
+    .bind(artistId)
+    .first<{ genre: string }>();
+  return row?.genre ?? null;
+}
+
+export async function getRandomTracksByArtist(db: D1Database, artistId: string, limit: number): Promise<TrackRow[]> {
+  const { results } = await db
+    .prepare(`${TRACK_SELECT} WHERE t.artist_id = ? ORDER BY RANDOM() LIMIT ?`)
+    .bind(artistId, limit)
+    .all<TrackRow>();
+  return results;
+}
+
+export async function getRandomTracksByGenreExcludingArtist(
+  db: D1Database,
+  genre: string,
+  excludeArtistId: string,
+  limit: number,
+): Promise<TrackRow[]> {
+  const { results } = await db
+    .prepare(`${TRACK_SELECT} WHERE al.genre = ? AND t.artist_id != ? ORDER BY RANDOM() LIMIT ?`)
+    .bind(genre, excludeArtistId, limit)
+    .all<TrackRow>();
+  return results;
+}
+
+// Fetches tracks by id, preserving the input order and silently dropping any
+// id that no longer exists (e.g. a track referenced by a saved play queue
+// that's since been deleted).
+export async function getTracksByIds(db: D1Database, ids: string[]): Promise<TrackRow[]> {
+  if (!ids.length) return [];
+  const placeholders = ids.map(() => "?").join(",");
+  const { results } = await db
+    .prepare(`${TRACK_SELECT} WHERE t.id IN (${placeholders})`)
+    .bind(...ids)
+    .all<TrackRow>();
+  const byId = new Map(results.map((t) => [t.id, t]));
+  return ids.map((id) => byId.get(id)).filter((t): t is TrackRow => !!t);
+}
+
+export interface PlayQueueRow {
+  owner: string;
+  track_ids: string;
+  current_id: string | null;
+  position_ms: number;
+  changed_at: number;
+  changed_by: string | null;
+}
+
+export async function getPlayQueue(db: D1Database, owner: string): Promise<PlayQueueRow | null> {
+  const row = await db.prepare(`SELECT * FROM play_queue WHERE owner = ?`).bind(owner).first<PlayQueueRow>();
+  return row ?? null;
+}
+
+export async function savePlayQueue(
+  db: D1Database,
+  owner: string,
+  opts: { trackIds: string[]; currentId: string | null; positionMs: number; changedBy: string | null },
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT OR REPLACE INTO play_queue (owner, track_ids, current_id, position_ms, changed_at, changed_by)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(owner, JSON.stringify(opts.trackIds), opts.currentId, opts.positionMs, Math.floor(Date.now() / 1000), opts.changedBy)
+    .run();
+}
+
 export async function listTracksUnderPath(db: D1Database, prefix: string): Promise<TrackRow[]> {
   const pattern = prefix ? `${prefix}/%` : "%";
   const { results } = await db

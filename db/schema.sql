@@ -85,6 +85,18 @@ CREATE TABLE IF NOT EXISTS folders (
   created_at INTEGER NOT NULL
 );
 
+-- getPlayQueue/savePlayQueue — one row per owner (single-user, so no need for
+-- a history of past queues). track_ids is a JSON array of track ids in queue
+-- order; current_id/position_ms track where playback was within that queue.
+CREATE TABLE IF NOT EXISTS play_queue (
+  owner       TEXT PRIMARY KEY,
+  track_ids   TEXT NOT NULL,
+  current_id  TEXT,
+  position_ms INTEGER NOT NULL DEFAULT 0,
+  changed_at  INTEGER NOT NULL,
+  changed_by  TEXT
+);
+
 -- Accounting for the optional R2 read-through cache (src/storage/cached.ts).
 -- Only populated when the CACHE_BUCKET binding is configured; harmless
 -- empty table otherwise. `key` is the sha256 hex of the file_ref/cover_ref

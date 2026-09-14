@@ -2,7 +2,15 @@ import type { Env } from "./types";
 import { authenticate } from "./auth";
 import { respond, subsonicError, subsonicSuccess, openSubsonicExtensionsResponse } from "./subsonic/response";
 import { node } from "./subsonic/node";
-import { artistNode, albumNode, songNode, playlistNode, playlistEntryNode, lyricsListNode } from "./subsonic/mappers";
+import {
+  artistNode,
+  albumNode,
+  songNode,
+  playlistNode,
+  playlistEntryNode,
+  lyricsListNode,
+  isoDate,
+} from "./subsonic/mappers";
 import * as browsing from "./subsonic/browsing";
 import * as media from "./subsonic/media";
 import * as q from "./db/queries";
@@ -46,6 +54,11 @@ const RANDOM_SONGS_FAVORITE_RATIO = 0.3;
 // without crowding out favorites/discovery.
 const RANDOM_SONGS_RECENT_RATIO = 0.3;
 const RANDOM_SONGS_RECENT_POOL = 100;
+
+// Share of getSimilarSongs2 drawn from the artist's own other tracks, rather
+// than same-genre tracks by other artists — see getRandomTracksByArtist /
+// getRandomTracksByGenreExcludingArtist in db/queries.ts.
+const SIMILAR_SONGS_ARTIST_RATIO = 0.6;
 
 function shuffle<T>(items: T[]): T[] {
   const result = [...items];
@@ -258,6 +271,42 @@ export default {
         return respond(subsonicSuccess(), format);
       }
 
+      case "getPlayQueue": {
+        const saved = await q.getPlayQueue(env.DB, auth.username);
+        if (!saved) return respond(subsonicSuccess(node("playQueue", { username: auth.username })), format);
+        const [tracks, starred] = await Promise.all([
+          q.getTracksByIds(env.DB, JSON.parse(saved.track_ids)),
+          q.getStarredIds(env.DB, auth.username),
+        ]);
+        return respond(
+          subsonicSuccess(
+            node(
+              "playQueue",
+              {
+                current: saved.current_id ?? undefined,
+                position: saved.position_ms,
+                username: auth.username,
+                changed: isoDate(saved.changed_at),
+                changedBy: saved.changed_by ?? undefined,
+              },
+              { lists: { entry: tracks.map((t) => playlistEntryNode(t, { starredAt: starred.tracks.get(t.id) })) } },
+            ),
+          ),
+          format,
+        );
+      }
+
+      case "savePlayQueue": {
+        const position = Number(params.get("position") ?? 0);
+        await q.savePlayQueue(env.DB, auth.username, {
+          trackIds: params.getAll("id"),
+          currentId: params.get("current"),
+          positionMs: Number.isFinite(position) ? position : 0,
+          changedBy: params.get("c"),
+        });
+        return respond(subsonicSuccess(), format);
+      }
+
       case "getRandomSongs": {
         const size = Math.min(Number(params.get("size") ?? 10), 500);
         const genre = params.get("genre") ?? undefined;
@@ -298,6 +347,61 @@ export default {
         return respond(
           subsonicSuccess(
             node("randomSongs", undefined, {
+              lists: { song: tracks.map((t) => songNode(t, { starredAt: starred.tracks.get(t.id) })) },
+            }),
+          ),
+          format,
+        );
+      }
+
+      case "getTopSongs": {
+        const artist = params.get("artist");
+        if (!artist) return respond(subsonicError(ERR.MISSING_PARAM, "Missing artist"), format);
+        const count = Math.min(Number(params.get("count") ?? 50), 500);
+        const tracks = await q.getTopSongsByArtistName(env.DB, artist, count);
+        const starred = await q.getStarredIds(env.DB, auth.username);
+        return respond(
+          subsonicSuccess(
+            node("topSongs", undefined, {
+              lists: { song: tracks.map((t) => songNode(t, { starredAt: starred.tracks.get(t.id) })) },
+            }),
+          ),
+          format,
+        );
+      }
+
+      // No "similar artists" graph here (that's normally sourced from
+      // Last.fm) — approximated locally by blending the artist's own other
+      // tracks with tracks from other artists sharing their most common
+      // genre. See SIMILAR_SONGS_ARTIST_RATIO and db/queries.ts.
+      case "getSimilarSongs2": {
+        const artistId = params.get("id");
+        if (!artistId) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
+        const count = Math.min(Number(params.get("count") ?? 50), 500);
+
+        const artistQuota = Math.round(count * SIMILAR_SONGS_ARTIST_RATIO);
+        const fromArtist = artistQuota ? await q.getRandomTracksByArtist(env.DB, artistId, artistQuota) : [];
+
+        const genreQuota = count - fromArtist.length;
+        const genre = genreQuota ? await q.getArtistPrimaryGenre(env.DB, artistId) : null;
+        const fromGenre = genre
+          ? await q.getRandomTracksByGenreExcludingArtist(env.DB, genre, artistId, genreQuota)
+          : [];
+
+        // Not enough same-genre tracks by other artists to fill the rest —
+        // top up with more from the artist itself rather than falling short.
+        const remaining = count - fromArtist.length - fromGenre.length;
+        const more = remaining
+          ? await q.getRandomTracksByArtist(env.DB, artistId, remaining + fromArtist.length)
+          : [];
+        const seen = new Set(fromArtist.map((t) => t.id));
+        const topUp = more.filter((t) => !seen.has(t.id)).slice(0, remaining);
+
+        const tracks = shuffle([...fromArtist, ...fromGenre, ...topUp]);
+        const starred = await q.getStarredIds(env.DB, auth.username);
+        return respond(
+          subsonicSuccess(
+            node("similarSongs2", undefined, {
               lists: { song: tracks.map((t) => songNode(t, { starredAt: starred.tracks.get(t.id) })) },
             }),
           ),
