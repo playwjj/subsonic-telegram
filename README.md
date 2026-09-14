@@ -108,7 +108,7 @@ Redeploy and the cache is live. There's no size limit on the library itself — 
 This is the whole point of the project, worth calling out explicitly: this Worker is a **real Subsonic server**, not a bespoke app that only works with the bundled Web UI. The [Subsonic API](http://www.subsonic.org/pages/api.jsp) is an open protocol that originated with the old Subsonic media server and today is spoken by a whole ecosystem of self-hosted servers (Navidrome, Airsonic, Ampache, gonic, ...) and, more usefully here, by dozens of existing client apps across every platform. Because this project implements that exact protocol (see [Implemented endpoints](#implemented-endpoints) above), any of those apps already works with it — nothing to build, no plugin, no custom integration.
 
 **Some popular clients**, pick whichever fits your platform — all of these connect to any Subsonic-compatible server, this one included:
-- iOS: Amperfy, play:Sub, iSub
+- iOS: Amperfy, play:Sub, SubStreamer
 - Android: DSub, Ultrasonic, Symfonium, substreamer
 - Desktop / cross-platform: Feishin, Sublime Music (Linux), Supersonic
 

@@ -107,7 +107,7 @@ npm run db:migrate:remote
 这其实是这个项目的核心价值所在，值得单独拎出来说清楚：这个 Worker 是一个**真正的 Subsonic 服务端**，不是一个只能配自带 Web UI 用的自造玩具。[Subsonic API](http://www.subsonic.org/pages/api.jsp) 是一套源自老牌 Subsonic 音乐服务器的开放协议，现在一大票自建音乐服务端（Navidrome、Airsonic、Ampache、gonic……）都在说这套协议，更重要的是——市面上早就有几十个跨平台的现成客户端在说这套协议。因为这个项目实现的就是这套协议本身（见上面[已实现的端点](#已实现的端点)），随便挑一个现成客户端就能直接连上来用，不用装插件、不用做任何定制对接。
 
 **常见客户端**（按平台任选一个，它们连的是任何兼容 Subsonic 协议的服务端，这个项目也不例外）：
-- iOS：Amperfy、play:Sub、iSub
+- iOS：Amperfy、play:Sub、SubStreamer
 - Android：DSub、Ultrasonic、Symfonium、substreamer
 - 桌面/跨平台：Feishin、Sublime Music（Linux）、Supersonic
 
