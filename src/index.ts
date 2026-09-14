@@ -75,6 +75,28 @@ export default {
     if (endpoint === "getLicense") {
       return respond(subsonicSuccess(node("license", { valid: true })), format);
     }
+    // TEMPORARY — one-shot follow-up to the earlier _migrateOwnerFk: renaming
+    // `playlists` there made SQLite auto-rewrite playlist_tracks's FK to
+    // point at the now-dropped `playlists_old`, leaving it with a dangling
+    // reference to a table that no longer exists (same "no such table"
+    // failure mode, just moved to playlist_tracks). Rebuilds it pointing at
+    // the current `playlists` table, preserving all rows.
+    if (endpoint === "_migratePlaylistTracksFk") {
+      const before = await env.DB.prepare(`SELECT COUNT(*) as c FROM playlist_tracks`).all();
+      await env.DB.batch([
+        env.DB.prepare(`ALTER TABLE playlist_tracks RENAME TO playlist_tracks_old`),
+        env.DB.prepare(
+          `CREATE TABLE playlist_tracks (playlist_id TEXT NOT NULL REFERENCES playlists(id), position INTEGER NOT NULL, track_id TEXT NOT NULL REFERENCES tracks(id), PRIMARY KEY (playlist_id, position))`,
+        ),
+        env.DB.prepare(`INSERT INTO playlist_tracks SELECT playlist_id, position, track_id FROM playlist_tracks_old`),
+        env.DB.prepare(`DROP TABLE playlist_tracks_old`),
+        env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist ON playlist_tracks(playlist_id)`),
+      ]);
+      const after = await env.DB.prepare(`SELECT COUNT(*) as c FROM playlist_tracks`).all();
+      return new Response(JSON.stringify({ before: before.results, after: after.results }, null, 2), {
+        headers: { "content-type": "application/json" },
+      });
+    }
 
     const telegram = new TelegramStorage(env.TG_BOT_TOKEN, env.TG_CHANNEL_ID);
     const storage: StorageBackend = env.CACHE_BUCKET
