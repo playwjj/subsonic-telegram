@@ -293,9 +293,18 @@ export interface RandomSongsOptions {
   genre?: string;
   fromYear?: number;
   toYear?: number;
+  // Tracks to leave out — used to fill the rest of a "size" quota after
+  // getRandomStarredTracks already claimed some of it, without risking the
+  // same track being picked twice.
+  excludeIds?: string[];
 }
 
-export async function getRandomSongs(db: D1Database, opts: RandomSongsOptions): Promise<TrackRow[]> {
+function randomSongsFilter(opts: {
+  genre?: string;
+  fromYear?: number;
+  toYear?: number;
+  excludeIds?: string[];
+}): { conditions: string[]; params: unknown[] } {
   const conditions: string[] = [];
   const params: unknown[] = [];
   if (opts.genre !== undefined) {
@@ -310,10 +319,36 @@ export async function getRandomSongs(db: D1Database, opts: RandomSongsOptions): 
     conditions.push("al.year <= ?");
     params.push(opts.toYear);
   }
+  if (opts.excludeIds?.length) {
+    conditions.push(`t.id NOT IN (${opts.excludeIds.map(() => "?").join(",")})`);
+    params.push(...opts.excludeIds);
+  }
+  return { conditions, params };
+}
+
+export async function getRandomSongs(db: D1Database, opts: RandomSongsOptions): Promise<TrackRow[]> {
+  const { conditions, params } = randomSongsFilter(opts);
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   params.push(opts.size);
   const { results } = await db
     .prepare(`${TRACK_SELECT} ${where} ORDER BY RANDOM() LIMIT ?`)
+    .bind(...params)
+    .all<TrackRow>();
+  return results;
+}
+
+// Same shape as getRandomSongs, restricted to owner's starred tracks — used
+// to blend a share of favorites into the "random songs" widget/endpoint.
+export async function getRandomStarredTracks(
+  db: D1Database,
+  owner: string,
+  opts: { size: number; genre?: string; fromYear?: number; toYear?: number },
+): Promise<TrackRow[]> {
+  const { conditions, params } = randomSongsFilter(opts);
+  conditions.push(`t.id IN (SELECT item_id FROM starred WHERE owner = ? AND item_type = 'track')`);
+  params.push(owner, opts.size);
+  const { results } = await db
+    .prepare(`${TRACK_SELECT} WHERE ${conditions.join(" AND ")} ORDER BY RANDOM() LIMIT ?`)
     .bind(...params)
     .all<TrackRow>();
   return results;

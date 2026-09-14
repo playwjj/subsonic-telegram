@@ -35,6 +35,20 @@ function sanitizeFolderPath(input: string): string {
     .join("/");
 }
 
+// Share of getRandomSongs made up of the owner's starred tracks (when they
+// have enough of them) — surfaces favorites more often without crowding out
+// discovery of the rest of the library.
+const RANDOM_SONGS_FAVORITE_RATIO = 0.3;
+
+function shuffle<T>(items: T[]): T[] {
+  const result = [...items];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -60,49 +74,6 @@ export default {
     }
     if (endpoint === "getLicense") {
       return respond(subsonicSuccess(node("license", { valid: true })), format);
-    }
-    // TEMPORARY — diagnosing a "no such table: main.users" error on
-    // star/unstar in production; remove once root-caused.
-    if (endpoint === "_debugSchema") {
-      const { results } = await env.DB.prepare(
-        `SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name`,
-      ).all();
-      return new Response(JSON.stringify(results, null, 2), {
-        headers: { "content-type": "application/json" },
-      });
-    }
-    // TEMPORARY — one-shot migration: the deployed `starred` and `playlists`
-    // tables still carry a stale `REFERENCES users(username)` FK from before
-    // db/schema.sql switched owner to a plain string (see its comment). That
-    // dangling reference (no `users` table exists) makes every write to
-    // either table throw "no such table: main.users". Rebuilds both tables
-    // without the FK, preserving all rows, then reports before/after counts.
-    if (endpoint === "_migrateOwnerFk") {
-      const before = await env.DB.batch([
-        env.DB.prepare(`SELECT COUNT(*) as c FROM starred`),
-        env.DB.prepare(`SELECT COUNT(*) as c FROM playlists`),
-      ]);
-      await env.DB.batch([
-        env.DB.prepare(`ALTER TABLE starred RENAME TO starred_old`),
-        env.DB.prepare(
-          `CREATE TABLE starred (owner TEXT NOT NULL, item_type TEXT NOT NULL, item_id TEXT NOT NULL, starred_at INTEGER NOT NULL, PRIMARY KEY (owner, item_type, item_id))`,
-        ),
-        env.DB.prepare(`INSERT INTO starred SELECT owner, item_type, item_id, starred_at FROM starred_old`),
-        env.DB.prepare(`DROP TABLE starred_old`),
-        env.DB.prepare(`ALTER TABLE playlists RENAME TO playlists_old`),
-        env.DB.prepare(
-          `CREATE TABLE playlists (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner TEXT NOT NULL, created_at INTEGER NOT NULL, changed_at INTEGER NOT NULL)`,
-        ),
-        env.DB.prepare(`INSERT INTO playlists SELECT id, name, owner, created_at, changed_at FROM playlists_old`),
-        env.DB.prepare(`DROP TABLE playlists_old`),
-      ]);
-      const after = await env.DB.batch([
-        env.DB.prepare(`SELECT COUNT(*) as c FROM starred`),
-        env.DB.prepare(`SELECT COUNT(*) as c FROM playlists`),
-      ]);
-      return new Response(JSON.stringify({ before: before.map((r) => r.results), after: after.map((r) => r.results) }, null, 2), {
-        headers: { "content-type": "application/json" },
-      });
     }
 
     const telegram = new TelegramStorage(env.TG_BOT_TOKEN, env.TG_CHANNEL_ID);
@@ -286,15 +257,24 @@ export default {
         const genre = params.get("genre") ?? undefined;
         const fromYearParam = params.get("fromYear");
         const toYearParam = params.get("toYear");
-        const [tracks, starred] = await Promise.all([
-          q.getRandomSongs(env.DB, {
-            size,
-            genre,
-            fromYear: fromYearParam ? Number(fromYearParam) : undefined,
-            toYear: toYearParam ? Number(toYearParam) : undefined,
-          }),
-          q.getStarredIds(env.DB, auth.username),
-        ]);
+        const fromYear = fromYearParam ? Number(fromYearParam) : undefined;
+        const toYear = toYearParam ? Number(toYearParam) : undefined;
+
+        const favoriteQuota = Math.round(size * RANDOM_SONGS_FAVORITE_RATIO);
+        const favorites = favoriteQuota
+          ? await q.getRandomStarredTracks(env.DB, auth.username, { size: favoriteQuota, genre, fromYear, toYear })
+          : [];
+        const rest = size - favorites.length
+          ? await q.getRandomSongs(env.DB, {
+              size: size - favorites.length,
+              genre,
+              fromYear,
+              toYear,
+              excludeIds: favorites.map((t) => t.id),
+            })
+          : [];
+        const tracks = shuffle([...favorites, ...rest]);
+        const starred = await q.getStarredIds(env.DB, auth.username);
         return respond(
           subsonicSuccess(
             node("randomSongs", undefined, {
