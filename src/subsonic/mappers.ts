@@ -1,5 +1,6 @@
 import { node, type SNode } from "./node";
 import type { ArtistRow, AlbumRow, TrackRow, PlaylistRow } from "../db/queries";
+import type { StructuredLyrics } from "../lyrics";
 
 export function isoDate(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toISOString();
@@ -85,4 +86,21 @@ export function playlistNode(p: PlaylistRow, opts?: { entries?: SNode[] }): SNod
     },
     opts?.entries ? { lists: { entry: opts.entries } } : undefined,
   );
+}
+
+// OpenSubsonic's getLyricsBySongId response shape (see src/lyrics.ts for how
+// `lyrics` is fetched) — a list of <structuredLyrics>, each a list of
+// per-line <line start="ms">text</line> (start omitted when unsynced).
+export function lyricsListNode(artist: string, title: string, lyrics: StructuredLyrics | null): SNode {
+  const entries =
+    lyrics && lyrics.lines.length
+      ? [
+          node(
+            "structuredLyrics",
+            { displayArtist: artist, displayTitle: title, lang: "xxx", synced: lyrics.synced },
+            { lists: { line: lyrics.lines.map((l) => node("line", { start: l.start }, { text: l.value })) } },
+          ),
+        ]
+      : [];
+  return node("lyricsList", undefined, { lists: { structuredLyrics: entries } });
 }

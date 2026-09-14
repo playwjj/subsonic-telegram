@@ -18,6 +18,24 @@ export function subsonicError(code: number, message: string): SNode {
   );
 }
 
+// getOpenSubsonicExtensions is the one response shape that doesn't fit
+// subsonicSuccess: its extensions are repeated <openSubsonicExtensions>
+// elements directly under <subsonic-response>, not wrapped in a body tag,
+// and the root carries a few extra identifying attributes.
+export function openSubsonicExtensionsResponse(extensions: SNode[]): SNode {
+  return node(
+    "subsonic-response",
+    {
+      status: "ok",
+      version: API_VERSION,
+      type: "subsonic-telegram",
+      serverVersion: "1.0.0",
+      openSubsonic: true,
+    },
+    { lists: { openSubsonicExtensions: extensions } },
+  );
+}
+
 function attrsToJSON(attrs?: SNode["attrs"]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (attrs) for (const [k, v] of Object.entries(attrs)) if (v !== undefined) out[k] = v;

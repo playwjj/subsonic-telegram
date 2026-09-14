@@ -1,12 +1,12 @@
 import type { Env } from "./types";
 import { authenticate } from "./auth";
-import { respond, subsonicError, subsonicSuccess } from "./subsonic/response";
+import { respond, subsonicError, subsonicSuccess, openSubsonicExtensionsResponse } from "./subsonic/response";
 import { node } from "./subsonic/node";
-import { artistNode, albumNode, songNode, playlistNode, playlistEntryNode } from "./subsonic/mappers";
+import { artistNode, albumNode, songNode, playlistNode, playlistEntryNode, lyricsListNode } from "./subsonic/mappers";
 import * as browsing from "./subsonic/browsing";
 import * as media from "./subsonic/media";
 import * as q from "./db/queries";
-import { fetchLyrics } from "./lyrics";
+import { fetchLyrics, fetchStructuredLyrics } from "./lyrics";
 import { TelegramStorage } from "./storage/telegram";
 import { CachedStorage } from "./storage/cached";
 import type { StorageBackend } from "./storage/types";
@@ -341,6 +341,21 @@ export default {
           subsonicSuccess(node("lyrics", { artist, title }, lyrics ? { text: lyrics } : undefined)),
           format,
         );
+      }
+
+      case "getOpenSubsonicExtensions":
+        return respond(
+          openSubsonicExtensionsResponse([node("openSubsonicExtensions", { name: "songLyrics" }, { lists: { versions: [node("versions", undefined, { text: "1" })] } })]),
+          format,
+        );
+
+      case "getLyricsBySongId": {
+        const songId = params.get("id");
+        if (!songId) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
+        const track = await q.getTrack(env.DB, songId);
+        if (!track) return respond(subsonicError(ERR.NOT_FOUND, "Song not found"), format);
+        const structured = await fetchStructuredLyrics(track.artist_name, track.title);
+        return respond(subsonicSuccess(lyricsListNode(track.artist_name, track.title, structured)), format);
       }
 
       case "star":
