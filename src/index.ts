@@ -61,6 +61,16 @@ export default {
     if (endpoint === "getLicense") {
       return respond(subsonicSuccess(node("license", { valid: true })), format);
     }
+    // TEMPORARY — diagnosing a "no such table: main.users" error on
+    // star/unstar in production; remove once root-caused.
+    if (endpoint === "_debugSchema") {
+      const { results } = await env.DB.prepare(
+        `SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name`,
+      ).all();
+      return new Response(JSON.stringify(results, null, 2), {
+        headers: { "content-type": "application/json" },
+      });
+    }
 
     const telegram = new TelegramStorage(env.TG_BOT_TOKEN, env.TG_CHANNEL_ID);
     const storage: StorageBackend = env.CACHE_BUCKET
