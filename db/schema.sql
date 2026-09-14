@@ -36,7 +36,12 @@ CREATE TABLE IF NOT EXISTS tracks (
                                  -- lets scripts/import-m3u.ts match .m3u entries to a track
   play_count   INTEGER NOT NULL DEFAULT 0,
   last_played  INTEGER,         -- unix seconds, set by the scrobble endpoint
-  rating       INTEGER NOT NULL DEFAULT 0 -- 0-5 stars, set by the setRating endpoint; 0 = unrated
+  rating       INTEGER NOT NULL DEFAULT 0, -- 0-5 stars, set by the setRating endpoint; 0 = unrated
+  cover_ref    TEXT             -- JSON: telegram file ref for a song-specific cover, or NULL.
+                                 -- Only set for tracks whose album is really a compilation of
+                                 -- unrelated songs (see scripts/fix-covers.ts) -- otherwise the
+                                 -- track just falls back to its album's cover_ref (see
+                                 -- src/subsonic/mappers.ts songNode / src/subsonic/media.ts).
 );
 CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album_id);
 CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist_id);

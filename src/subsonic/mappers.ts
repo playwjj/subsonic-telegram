@@ -56,7 +56,7 @@ export function songNode(t: TrackRow, opts?: { starredAt?: number }): SNode {
     suffix: t.suffix,
     duration: t.duration ?? undefined,
     bitRate: t.bitrate ?? undefined,
-    coverArt: t.album_id,
+    coverArt: t.cover_ref ? t.id : t.album_id,
     albumId: t.album_id,
     artistId: t.artist_id,
     playCount: t.play_count || undefined,

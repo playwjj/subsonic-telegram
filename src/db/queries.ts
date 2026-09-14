@@ -42,6 +42,7 @@ export interface TrackRow {
   last_played: number | null;
   source_path: string | null;
   rating: number;
+  cover_ref: string | null;
 }
 
 const ARTIST_SELECT = `
