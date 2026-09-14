@@ -75,15 +75,6 @@ export default {
     const auth = await authenticate(env, params);
     if (!auth.ok) return respond(subsonicError(auth.code, auth.message), format);
 
-    // TEMPORARY — one-shot migration: adds the `rating` column to `tracks`
-    // for the new setRating/userRating feature on the deployed DB (fresh
-    // installs already get it from db/schema.sql). Remove this block once
-    // it's been run against production.
-    if (endpoint === "_migrateAddRatingColumn") {
-      await env.DB.prepare(`ALTER TABLE tracks ADD COLUMN rating INTEGER NOT NULL DEFAULT 0`).run();
-      return respond(subsonicSuccess(), format);
-    }
-
     if (endpoint === "ping") {
       return respond(subsonicSuccess(), format);
     }
