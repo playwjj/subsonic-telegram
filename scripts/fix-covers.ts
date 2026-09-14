@@ -19,9 +19,10 @@
 // finds nothing, this falls back to searching per SONG (artist + track
 // title) and stores the result on that one track (tracks.cover_ref) instead
 // of the album. If even the exact song search misses, and --loose-fallback
-// is set, it takes the artist's top iTunes hit as a "related, not exact"
-// cover rather than leaving the track with nothing. If that also misses
-// and --fallback-cover is set, the track gets docs/music-cover.jpg instead
+// is set, it tries a photo of the artist (Deezer) first, then their top
+// iTunes hit's album art as a last resort "related, not exact" cover rather
+// than leaving the track with nothing. If that also misses and
+// --fallback-cover is set, the track gets docs/music-cover.jpg instead
 // (uploaded once, then the same Telegram ref is reused for every track that
 // falls this far).
 //
@@ -342,10 +343,43 @@ async function searchSongArtwork(artist: string, title: string): Promise<string 
   return searchMusicBrainzSongArtwork(artist, title);
 }
 
-// No exact song match -- grab the artist's top hit as a "related, not
-// exact" cover rather than leaving the track with nothing. Only used when
-// --loose-fallback is passed, since it can attach the wrong song's art.
+// Deezer's artist search (free, no key) reliably has a real photo for
+// well-known artists, including most of this library's Cantopop/Mandopop
+// names -- checked against 刘德华 and BY2 during development, both resolved
+// to an actual portrait rather than album art. Preferred over
+// searchLooseArtwork below: a photo of the right person is never
+// misleading about who made the song, whereas a different song's cover can
+// visually suggest the wrong release (or even the wrong featured artist).
+const DEEZER_DELAY_MS = 400;
+
+type DeezerArtist = { name: string; picture_xl: string };
+
+async function searchArtistPhoto(artist: string): Promise<string | null> {
+  await sleep(DEEZER_DELAY_MS);
+  try {
+    const res = await fetch(`https://api.deezer.com/search/artist?q=${encodeURIComponent(artist)}&limit=5`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { data: DeezerArtist[] };
+    const hit = data.data?.find((a) => textMatches(artist, a.name));
+    return hit?.picture_xl ?? null;
+  } catch (err) {
+    console.warn(`  Deezer artist lookup failed: ${err}`);
+    return null;
+  }
+}
+
+// No exact song match -- try a photo of the artist first, falling back to
+// their top iTunes hit's album art as a last resort "related, not exact"
+// cover rather than leaving the track with nothing. Only used when
+// --loose-fallback is passed, since even the artist-photo tier can't
+// promise this is really the right song.
 async function searchLooseArtwork(artist: string, title: string): Promise<string | null> {
+  const photo = await searchArtistPhoto(artist);
+  if (photo) {
+    console.log(`  loose match: using a photo of ${artist} (exact title "${title}" not found)`);
+    return photo;
+  }
+
   const hit = await searchItunes<ItunesSong>(artist, "song", (r) => textMatches(artist, r.artistName));
   if (!hit) return null;
   console.log(`  loose match: using artwork from "${hit.trackName}" (exact title "${title}" not found)`);
