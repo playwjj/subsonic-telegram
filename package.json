@@ -32,6 +32,7 @@
   },
   "dependencies": {
     "dotenv": "^16.4.5",
-    "music-metadata": "^10.6.4"
+    "music-metadata": "^10.6.4",
+    "opencc-js": "^1.4.2"
   }
 }

@@ -6,5 +6,7 @@ node_modules/
 .wrangler/
 dist/
 .import-state.json
+.cover-fix-state.json
+.cover-fallback-ref.json
 *.log
 .DS_Store
