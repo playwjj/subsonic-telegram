@@ -355,6 +355,42 @@ export async function unstarItem(
     .run();
 }
 
+// One owner's whole starred set, keyed by item type — cheap enough (one
+// query, one row per starred item) to fetch per-request and use to annotate
+// every artist/album/song a response returns, rather than joining `starred`
+// into each of the ARTIST_SELECT/ALBUM_SELECT/TRACK_SELECT templates above.
+export interface StarredIds {
+  artists: Map<string, number>;
+  albums: Map<string, number>;
+  tracks: Map<string, number>;
+}
+
+export async function getStarredIds(db: D1Database, owner: string): Promise<StarredIds> {
+  const { results } = await db
+    .prepare(`SELECT item_type, item_id, starred_at FROM starred WHERE owner = ?`)
+    .bind(owner)
+    .all<{ item_type: StarredItemType; item_id: string; starred_at: number }>();
+  const ids: StarredIds = { artists: new Map(), albums: new Map(), tracks: new Map() };
+  for (const r of results) {
+    const map = r.item_type === "artist" ? ids.artists : r.item_type === "album" ? ids.albums : ids.tracks;
+    map.set(r.item_id, r.starred_at);
+  }
+  return ids;
+}
+
+export async function getStarredAt(
+  db: D1Database,
+  owner: string,
+  itemType: StarredItemType,
+  itemId: string,
+): Promise<number | undefined> {
+  const row = await db
+    .prepare(`SELECT starred_at FROM starred WHERE owner = ? AND item_type = ? AND item_id = ?`)
+    .bind(owner, itemType, itemId)
+    .first<{ starred_at: number }>();
+  return row?.starred_at ?? undefined;
+}
+
 export async function getStarredArtists(db: D1Database, owner: string): Promise<ArtistRow[]> {
   const { results } = await db
     .prepare(

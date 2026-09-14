@@ -1,15 +1,24 @@
 import { node, type SNode } from "./node";
 import type { ArtistRow, AlbumRow, TrackRow, PlaylistRow } from "../db/queries";
 
-function isoDate(unixSeconds: number): string {
+export function isoDate(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toISOString();
 }
 
-export function artistNode(a: ArtistRow): SNode {
-  return node("artist", { id: a.id, name: a.name, albumCount: a.album_count });
+export function artistNode(a: ArtistRow, opts?: { albums?: SNode[]; starredAt?: number }): SNode {
+  return node(
+    "artist",
+    {
+      id: a.id,
+      name: a.name,
+      albumCount: a.album_count,
+      starred: opts?.starredAt ? isoDate(opts.starredAt) : undefined,
+    },
+    opts?.albums ? { lists: { album: opts.albums } } : undefined,
+  );
 }
 
-export function albumNode(al: AlbumRow, opts?: { songs?: SNode[] }): SNode {
+export function albumNode(al: AlbumRow, opts?: { songs?: SNode[]; starredAt?: number }): SNode {
   return node(
     "album",
     {
@@ -23,12 +32,13 @@ export function albumNode(al: AlbumRow, opts?: { songs?: SNode[] }): SNode {
       year: al.year ?? undefined,
       genre: al.genre ?? undefined,
       coverArt: al.cover_ref ? al.id : undefined,
+      starred: opts?.starredAt ? isoDate(opts.starredAt) : undefined,
     },
     opts?.songs ? { lists: { song: opts.songs } } : undefined,
   );
 }
 
-export function songNode(t: TrackRow): SNode {
+export function songNode(t: TrackRow, opts?: { starredAt?: number }): SNode {
   return node("song", {
     id: t.id,
     parent: t.album_id,
@@ -50,13 +60,14 @@ export function songNode(t: TrackRow): SNode {
     artistId: t.artist_id,
     playCount: t.play_count || undefined,
     played: t.last_played ? isoDate(t.last_played) : undefined,
+    starred: opts?.starredAt ? isoDate(opts.starredAt) : undefined,
     type: "music",
   });
 }
 
 // Playlist entries use the same fields as a song, just under an <entry> tag.
-export function playlistEntryNode(t: TrackRow): SNode {
-  return { ...songNode(t), tag: "entry" };
+export function playlistEntryNode(t: TrackRow, opts?: { starredAt?: number }): SNode {
+  return { ...songNode(t, opts), tag: "entry" };
 }
 
 export function playlistNode(p: PlaylistRow, opts?: { entries?: SNode[] }): SNode {

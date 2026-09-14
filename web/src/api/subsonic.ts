@@ -73,6 +73,7 @@ export interface Artist {
   id: string;
   name: string;
   albumCount: number;
+  starred?: string;
 }
 
 export interface ArtistIndex {
@@ -91,6 +92,7 @@ export interface Album {
   year?: number;
   genre?: string;
   coverArt?: string;
+  starred?: string;
 }
 
 export interface Song {
@@ -113,6 +115,7 @@ export interface Song {
   albumId: string;
   artistId: string;
   type: string;
+  starred?: string;
 }
 
 export interface ArtistDetail extends Artist {
@@ -251,6 +254,14 @@ export async function getMostPlayed(size: number): Promise<Song[]> {
 
 export async function scrobble(id: string): Promise<void> {
   await call("scrobble", { id });
+}
+
+export async function star(songId: string): Promise<void> {
+  await call("star", { id: songId });
+}
+
+export async function unstar(songId: string): Promise<void> {
+  await call("unstar", { id: songId });
 }
 
 export interface FolderDir {

@@ -78,10 +78,10 @@ export default {
         return respond(subsonicSuccess(browsing.getMusicFolders()), format);
 
       case "getIndexes":
-        return respond(subsonicSuccess(await browsing.getIndexes(env.DB)), format);
+        return respond(subsonicSuccess(await browsing.getIndexes(env.DB, auth.username)), format);
 
       case "getArtists":
-        return respond(subsonicSuccess(await browsing.getArtists(env.DB)), format);
+        return respond(subsonicSuccess(await browsing.getArtists(env.DB, auth.username)), format);
 
       case "getGenres":
         return respond(subsonicSuccess(await browsing.getGenres(env.DB)), format);
@@ -89,7 +89,7 @@ export default {
       case "getArtist": {
         const id = params.get("id");
         if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
-        const result = await browsing.getArtist(env.DB, id);
+        const result = await browsing.getArtist(env.DB, auth.username, id);
         if (!result) return respond(subsonicError(ERR.NOT_FOUND, "Artist not found"), format);
         return respond(subsonicSuccess(result), format);
       }
@@ -97,7 +97,7 @@ export default {
       case "getAlbum": {
         const id = params.get("id");
         if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
-        const result = await browsing.getAlbum(env.DB, id);
+        const result = await browsing.getAlbum(env.DB, auth.username, id);
         if (!result) return respond(subsonicError(ERR.NOT_FOUND, "Album not found"), format);
         return respond(subsonicSuccess(result), format);
       }
@@ -107,14 +107,15 @@ export default {
         if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
         const track = await q.getTrack(env.DB, id);
         if (!track) return respond(subsonicError(ERR.NOT_FOUND, "Song not found"), format);
-        return respond(subsonicSuccess(songNode(track)), format);
+        const starredAt = await q.getStarredAt(env.DB, auth.username, "track", id);
+        return respond(subsonicSuccess(songNode(track, { starredAt })), format);
       }
 
       case "getAlbumList2": {
         const type = params.get("type") ?? "newest";
         const size = Math.min(Number(params.get("size") ?? 20), 500);
         const offset = Number(params.get("offset") ?? 0);
-        return respond(subsonicSuccess(await browsing.getAlbumList2(env.DB, type, size, offset)), format);
+        return respond(subsonicSuccess(await browsing.getAlbumList2(env.DB, auth.username, type, size, offset)), format);
       }
 
       case "search3": {
@@ -122,14 +123,17 @@ export default {
         const artistCount = Number(params.get("artistCount") ?? 20);
         const albumCount = Number(params.get("albumCount") ?? 20);
         const songCount = Number(params.get("songCount") ?? 20);
-        const results = await q.search3(env.DB, query, artistCount, albumCount, songCount);
+        const [results, starred] = await Promise.all([
+          q.search3(env.DB, query, artistCount, albumCount, songCount),
+          q.getStarredIds(env.DB, auth.username),
+        ]);
         return respond(
           subsonicSuccess(
             node("searchResult3", undefined, {
               lists: {
-                artist: results.artists.map(artistNode),
-                album: results.albums.map((a) => albumNode(a)),
-                song: results.songs.map(songNode),
+                artist: results.artists.map((a) => artistNode(a, { starredAt: starred.artists.get(a.id) })),
+                album: results.albums.map((a) => albumNode(a, { starredAt: starred.albums.get(a.id) })),
+                song: results.songs.map((t) => songNode(t, { starredAt: starred.tracks.get(t.id) })),
               },
             }),
           ),
@@ -163,8 +167,18 @@ export default {
         if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
         const playlist = await q.getPlaylist(env.DB, id);
         if (!playlist) return respond(subsonicError(ERR.NOT_FOUND, "Playlist not found"), format);
-        const tracks = await q.listPlaylistTracks(env.DB, id);
-        return respond(subsonicSuccess(playlistNode(playlist, { entries: tracks.map(playlistEntryNode) })), format);
+        const [tracks, starred] = await Promise.all([
+          q.listPlaylistTracks(env.DB, id),
+          q.getStarredIds(env.DB, auth.username),
+        ]);
+        return respond(
+          subsonicSuccess(
+            playlistNode(playlist, {
+              entries: tracks.map((t) => playlistEntryNode(t, { starredAt: starred.tracks.get(t.id) })),
+            }),
+          ),
+          format,
+        );
       }
 
       case "createPlaylist": {
@@ -184,8 +198,18 @@ export default {
           await q.createPlaylist(env.DB, id, name, auth.username, songIds);
         }
         const playlist = (await q.getPlaylist(env.DB, id))!;
-        const tracks = await q.listPlaylistTracks(env.DB, id);
-        return respond(subsonicSuccess(playlistNode(playlist, { entries: tracks.map(playlistEntryNode) })), format);
+        const [tracks, starred] = await Promise.all([
+          q.listPlaylistTracks(env.DB, id),
+          q.getStarredIds(env.DB, auth.username),
+        ]);
+        return respond(
+          subsonicSuccess(
+            playlistNode(playlist, {
+              entries: tracks.map((t) => playlistEntryNode(t, { starredAt: starred.tracks.get(t.id) })),
+            }),
+          ),
+          format,
+        );
       }
 
       case "updatePlaylist": {
@@ -218,13 +242,23 @@ export default {
         const genre = params.get("genre") ?? undefined;
         const fromYearParam = params.get("fromYear");
         const toYearParam = params.get("toYear");
-        const tracks = await q.getRandomSongs(env.DB, {
-          size,
-          genre,
-          fromYear: fromYearParam ? Number(fromYearParam) : undefined,
-          toYear: toYearParam ? Number(toYearParam) : undefined,
-        });
-        return respond(subsonicSuccess(node("randomSongs", undefined, { lists: { song: tracks.map(songNode) } })), format);
+        const [tracks, starred] = await Promise.all([
+          q.getRandomSongs(env.DB, {
+            size,
+            genre,
+            fromYear: fromYearParam ? Number(fromYearParam) : undefined,
+            toYear: toYearParam ? Number(toYearParam) : undefined,
+          }),
+          q.getStarredIds(env.DB, auth.username),
+        ]);
+        return respond(
+          subsonicSuccess(
+            node("randomSongs", undefined, {
+              lists: { song: tracks.map((t) => songNode(t, { starredAt: starred.tracks.get(t.id) })) },
+            }),
+          ),
+          format,
+        );
       }
 
       case "scrobble": {
@@ -257,18 +291,19 @@ export default {
       case "getStarred":
       case "getStarred2": {
         const tag = endpoint === "getStarred" ? "starred" : "starred2";
-        const [artists, albums, tracks] = await Promise.all([
+        const [artists, albums, tracks, starred] = await Promise.all([
           q.getStarredArtists(env.DB, auth.username),
           q.getStarredAlbums(env.DB, auth.username),
           q.getStarredTracks(env.DB, auth.username),
+          q.getStarredIds(env.DB, auth.username),
         ]);
         return respond(
           subsonicSuccess(
             node(tag, undefined, {
               lists: {
-                artist: artists.map((a) => artistNode(a)),
-                album: albums.map((a) => albumNode(a)),
-                song: tracks.map(songNode),
+                artist: artists.map((a) => artistNode(a, { starredAt: starred.artists.get(a.id) })),
+                album: albums.map((a) => albumNode(a, { starredAt: starred.albums.get(a.id) })),
+                song: tracks.map((t) => songNode(t, { starredAt: starred.tracks.get(t.id) })),
               },
             }),
           ),
@@ -300,9 +335,14 @@ export default {
         const size = Math.min(Number(params.get("size") ?? 50), 500);
         const offset = Number(params.get("offset") ?? 0);
         const sort = params.get("sort") ?? "title";
-        const { tracks, total } = await q.listAllTracks(env.DB, { limit: size, offset, sort });
+        const [{ tracks, total }, starred] = await Promise.all([
+          q.listAllTracks(env.DB, { limit: size, offset, sort }),
+          q.getStarredIds(env.DB, auth.username),
+        ]);
         return respond(
-          subsonicSuccess(node("songs", { total }, { lists: { song: tracks.map(songNode) } })),
+          subsonicSuccess(
+            node("songs", { total }, { lists: { song: tracks.map((t) => songNode(t, { starredAt: starred.tracks.get(t.id) })) } }),
+          ),
           format,
         );
       }
@@ -310,19 +350,25 @@ export default {
       case "getRecentlyPlayed":
       case "getMostPlayed": {
         const size = Math.min(Number(params.get("size") ?? 20), 500);
-        const tracks =
-          endpoint === "getRecentlyPlayed"
-            ? await q.getRecentlyPlayed(env.DB, size)
-            : await q.getMostPlayed(env.DB, size);
+        const [tracks, starred] = await Promise.all([
+          endpoint === "getRecentlyPlayed" ? q.getRecentlyPlayed(env.DB, size) : q.getMostPlayed(env.DB, size),
+          q.getStarredIds(env.DB, auth.username),
+        ]);
         const tag = endpoint === "getRecentlyPlayed" ? "recentlyPlayed" : "mostPlayed";
-        return respond(subsonicSuccess(node(tag, undefined, { lists: { song: tracks.map(songNode) } })), format);
+        return respond(
+          subsonicSuccess(
+            node(tag, undefined, { lists: { song: tracks.map((t) => songNode(t, { starredAt: starred.tracks.get(t.id) })) } }),
+          ),
+          format,
+        );
       }
 
       case "getFolder": {
         const path = params.get("path") ?? "";
-        const [rows, explicitFolders] = await Promise.all([
+        const [rows, explicitFolders, starred] = await Promise.all([
           q.listTracksUnderPath(env.DB, path),
           q.listFoldersUnderPath(env.DB, path),
+          q.getStarredIds(env.DB, auth.username),
         ]);
         const prefixLen = path ? path.length + 1 : 0;
         const dirs = new Set<string>();
@@ -362,7 +408,7 @@ export default {
                   dir: [...dirs]
                     .sort((a, b) => a.localeCompare(b))
                     .map((name) => node("dir", { name, empty: !nonEmptyDirs.has(name) })),
-                  song: tracks.map(songNode),
+                  song: tracks.map((t) => songNode(t, { starredAt: starred.tracks.get(t.id) })),
                 },
               },
             ),

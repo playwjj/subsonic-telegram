@@ -4,8 +4,8 @@ import * as q from "../db/queries";
 
 const IGNORED_ARTICLES = "The El La Los Las Le Les";
 
-async function buildArtistIndex(db: D1Database): Promise<SNode[]> {
-  const artists = await q.listArtistsWithCounts(db);
+async function buildArtistIndex(db: D1Database, owner: string): Promise<SNode[]> {
+  const [artists, starred] = await Promise.all([q.listArtistsWithCounts(db), q.getStarredIds(db, owner)]);
   const groups = new Map<string, q.ArtistRow[]>();
   for (const a of artists) {
     const first = a.sort_name[0] ?? "#";
@@ -15,7 +15,13 @@ async function buildArtistIndex(db: D1Database): Promise<SNode[]> {
   }
   return [...groups.entries()]
     .sort(([x], [y]) => x.localeCompare(y))
-    .map(([letter, list]) => node("index", { name: letter }, { lists: { artist: list.map(artistNode) } }));
+    .map(([letter, list]) =>
+      node(
+        "index",
+        { name: letter },
+        { lists: { artist: list.map((a) => artistNode(a, { starredAt: starred.artists.get(a.id) })) } },
+      ),
+    );
 }
 
 export function getMusicFolders(): SNode {
@@ -24,37 +30,47 @@ export function getMusicFolders(): SNode {
   });
 }
 
-export async function getIndexes(db: D1Database): Promise<SNode> {
-  const index = await buildArtistIndex(db);
+export async function getIndexes(db: D1Database, owner: string): Promise<SNode> {
+  const index = await buildArtistIndex(db, owner);
   return node("indexes", { lastModified: Date.now(), ignoredArticles: IGNORED_ARTICLES }, { lists: { index } });
 }
 
-export async function getArtists(db: D1Database): Promise<SNode> {
-  const index = await buildArtistIndex(db);
+export async function getArtists(db: D1Database, owner: string): Promise<SNode> {
+  const index = await buildArtistIndex(db, owner);
   return node("artists", { ignoredArticles: IGNORED_ARTICLES }, { lists: { index } });
 }
 
-export async function getArtist(db: D1Database, id: string): Promise<SNode | null> {
+export async function getArtist(db: D1Database, owner: string, id: string): Promise<SNode | null> {
   const artist = await q.getArtist(db, id);
   if (!artist) return null;
-  const albums = await q.listAlbumsByArtist(db, id);
-  return node(
-    "artist",
-    { id: artist.id, name: artist.name, albumCount: artist.album_count },
-    { lists: { album: albums.map((al) => albumNode(al)) } },
-  );
+  const [albums, starred] = await Promise.all([q.listAlbumsByArtist(db, id), q.getStarredIds(db, owner)]);
+  return artistNode(artist, {
+    albums: albums.map((al) => albumNode(al, { starredAt: starred.albums.get(al.id) })),
+    starredAt: starred.artists.get(id),
+  });
 }
 
-export async function getAlbum(db: D1Database, id: string): Promise<SNode | null> {
+export async function getAlbum(db: D1Database, owner: string, id: string): Promise<SNode | null> {
   const album = await q.getAlbum(db, id);
   if (!album) return null;
-  const tracks = await q.listTracksByAlbum(db, id);
-  return albumNode(album, { songs: tracks.map(songNode) });
+  const [tracks, starred] = await Promise.all([q.listTracksByAlbum(db, id), q.getStarredIds(db, owner)]);
+  return albumNode(album, {
+    songs: tracks.map((t) => songNode(t, { starredAt: starred.tracks.get(t.id) })),
+    starredAt: starred.albums.get(id),
+  });
 }
 
-export async function getAlbumList2(db: D1Database, type: string, size: number, offset: number): Promise<SNode> {
-  const albums = await q.listAlbumList2(db, type, size, offset);
-  return node("albumList2", undefined, { lists: { album: albums.map((al) => albumNode(al)) } });
+export async function getAlbumList2(
+  db: D1Database,
+  owner: string,
+  type: string,
+  size: number,
+  offset: number,
+): Promise<SNode> {
+  const [albums, starred] = await Promise.all([q.listAlbumList2(db, type, size, offset), q.getStarredIds(db, owner)]);
+  return node("albumList2", undefined, {
+    lists: { album: albums.map((al) => albumNode(al, { starredAt: starred.albums.get(al.id) })) },
+  });
 }
 
 export async function getGenres(db: D1Database): Promise<SNode> {

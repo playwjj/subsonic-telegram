@@ -1,9 +1,28 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { playerState, currentTrack, toggle, next, prev, seek } from "../stores/player";
-import { coverArtUrl } from "../api/subsonic";
+import { coverArtUrl, star, unstar } from "../api/subsonic";
 
 function onSeek(e: Event) {
   seek(Number((e.target as HTMLInputElement).value));
+}
+
+const starred = computed(() => !!currentTrack.value?.starred);
+
+// Mutates the shared Song object (not a local copy) — currentTrack is the
+// same reactive object the track's list row renders, so this keeps both in
+// sync without a round-trip re-fetch.
+async function toggleStar() {
+  const track = currentTrack.value;
+  if (!track) return;
+  const nextStarred = !starred.value;
+  const prevStarred = track.starred;
+  track.starred = nextStarred ? new Date().toISOString() : undefined; // optimistic
+  try {
+    await (nextStarred ? star(track.id) : unstar(track.id));
+  } catch {
+    track.starred = prevStarred;
+  }
 }
 
 function formatTime(sec: number): string {
@@ -21,6 +40,14 @@ function formatTime(sec: number): string {
       <div class="title">{{ currentTrack.title }}</div>
       <div class="artist">{{ currentTrack.artist }}</div>
     </div>
+    <button
+      class="heart-btn"
+      :class="{ starred }"
+      :title="starred ? 'Unfavorite' : 'Favorite'"
+      @click="toggleStar"
+    >
+      {{ starred ? "♥" : "♡" }}
+    </button>
     <div class="controls">
       <button @click="prev">⏮</button>
       <button class="play-pause" @click="toggle">{{ playerState.isPlaying ? "⏸" : "▶" }}</button>
@@ -79,6 +106,30 @@ function formatTime(sec: number): string {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.heart-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  line-height: 1;
+  font-size: 1.1rem;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.heart-btn:hover {
+  opacity: 1;
+}
+.heart-btn.starred {
+  color: #e0245e;
+  opacity: 1;
 }
 .controls {
   display: flex;
