@@ -375,13 +375,23 @@ const DEEZER_DELAY_MS = 400;
 
 type DeezerArtist = { name: string; picture_xl: string };
 
+// Deezer still returns a search hit for an artist it has no photo for --
+// picture_xl just points at its generic gray-silhouette placeholder instead
+// of a real portrait. The tell is the URL's hash segment: a real photo's
+// path is ".../artist/<md5-hash>/...", an artist with nothing uploaded gets
+// ".../artist//..." (empty hash). Matched against a handful of confirmed
+// cases (周杰伦, 洛天依, 晃儿, 鬼月) that had this exact empty segment.
+function isDeezerPlaceholderPhoto(url: string): boolean {
+  return /\/artist\/\/[^/]*$/.test(url);
+}
+
 async function searchArtistPhoto(artist: string): Promise<string | null> {
   await sleep(DEEZER_DELAY_MS);
   try {
     const res = await fetch(`https://api.deezer.com/search/artist?q=${encodeURIComponent(artist)}&limit=5`);
     if (!res.ok) return null;
     const data = (await res.json()) as { data: DeezerArtist[] };
-    const hit = data.data?.find((a) => textMatches(artist, a.name));
+    const hit = data.data?.find((a) => textMatches(artist, a.name) && a.picture_xl && !isDeezerPlaceholderPhoto(a.picture_xl));
     return hit?.picture_xl ?? null;
   } catch (err) {
     console.warn(`  Deezer artist lookup failed: ${err}`);
