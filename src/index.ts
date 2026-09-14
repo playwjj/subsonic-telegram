@@ -71,6 +71,39 @@ export default {
         headers: { "content-type": "application/json" },
       });
     }
+    // TEMPORARY — one-shot migration: the deployed `starred` and `playlists`
+    // tables still carry a stale `REFERENCES users(username)` FK from before
+    // db/schema.sql switched owner to a plain string (see its comment). That
+    // dangling reference (no `users` table exists) makes every write to
+    // either table throw "no such table: main.users". Rebuilds both tables
+    // without the FK, preserving all rows, then reports before/after counts.
+    if (endpoint === "_migrateOwnerFk") {
+      const before = await env.DB.batch([
+        env.DB.prepare(`SELECT COUNT(*) as c FROM starred`),
+        env.DB.prepare(`SELECT COUNT(*) as c FROM playlists`),
+      ]);
+      await env.DB.batch([
+        env.DB.prepare(`ALTER TABLE starred RENAME TO starred_old`),
+        env.DB.prepare(
+          `CREATE TABLE starred (owner TEXT NOT NULL, item_type TEXT NOT NULL, item_id TEXT NOT NULL, starred_at INTEGER NOT NULL, PRIMARY KEY (owner, item_type, item_id))`,
+        ),
+        env.DB.prepare(`INSERT INTO starred SELECT owner, item_type, item_id, starred_at FROM starred_old`),
+        env.DB.prepare(`DROP TABLE starred_old`),
+        env.DB.prepare(`ALTER TABLE playlists RENAME TO playlists_old`),
+        env.DB.prepare(
+          `CREATE TABLE playlists (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner TEXT NOT NULL, created_at INTEGER NOT NULL, changed_at INTEGER NOT NULL)`,
+        ),
+        env.DB.prepare(`INSERT INTO playlists SELECT id, name, owner, created_at, changed_at FROM playlists_old`),
+        env.DB.prepare(`DROP TABLE playlists_old`),
+      ]);
+      const after = await env.DB.batch([
+        env.DB.prepare(`SELECT COUNT(*) as c FROM starred`),
+        env.DB.prepare(`SELECT COUNT(*) as c FROM playlists`),
+      ]);
+      return new Response(JSON.stringify({ before: before.map((r) => r.results), after: after.map((r) => r.results) }, null, 2), {
+        headers: { "content-type": "application/json" },
+      });
+    }
 
     const telegram = new TelegramStorage(env.TG_BOT_TOKEN, env.TG_CHANNEL_ID);
     const storage: StorageBackend = env.CACHE_BUCKET
