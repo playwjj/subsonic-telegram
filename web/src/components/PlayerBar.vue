@@ -1,14 +1,44 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { playerState, currentTrack, toggle, next, prev, seek } from "../stores/player";
-import { coverArtUrl, star, unstar } from "../api/subsonic";
+import { coverArtUrl, star, unstar, getLyrics } from "../api/subsonic";
 import StarRating from "./StarRating.vue";
+import Modal from "./Modal.vue";
 
 function onSeek(e: Event) {
   seek(Number((e.target as HTMLInputElement).value));
 }
 
 const starred = computed(() => !!currentTrack.value?.starred);
+
+const showLyrics = ref(false);
+const lyricsState = ref<"loading" | "found" | "empty" | "error">("loading");
+const lyricsText = ref("");
+
+async function loadLyrics() {
+  const track = currentTrack.value;
+  if (!track) return;
+  lyricsState.value = "loading";
+  try {
+    const lyrics = await getLyrics(track.artist, track.title);
+    lyricsText.value = lyrics.value ?? "";
+    lyricsState.value = lyrics.value ? "found" : "empty";
+  } catch {
+    lyricsState.value = "error";
+  }
+}
+
+function openLyrics() {
+  showLyrics.value = true;
+  loadLyrics();
+}
+
+// Keep showing lyrics through track changes (e.g. a queue playing through)
+// rather than silently going stale — but only while the panel is open, so
+// switching tracks never fires an LRCLIB request the user hasn't asked for.
+watch(currentTrack, () => {
+  if (showLyrics.value) loadLyrics();
+});
 
 // Mutates the shared Song object (not a local copy) — currentTrack is the
 // same reactive object the track's list row renders, so this keeps both in
@@ -50,6 +80,7 @@ function formatTime(sec: number): string {
       {{ starred ? "♥" : "♡" }}
     </button>
     <StarRating :song="currentTrack" />
+    <button class="heart-btn" title="Lyrics" @click="openLyrics">🎤</button>
     <div class="controls">
       <button @click="prev">⏮</button>
       <button class="play-pause" @click="toggle">{{ playerState.isPlaying ? "⏸" : "▶" }}</button>
@@ -65,6 +96,17 @@ function formatTime(sec: number): string {
       @input="onSeek"
     />
     <span class="time">{{ formatTime(playerState.duration) }}</span>
+
+    <Modal
+      v-if="showLyrics"
+      :title="`${currentTrack.title} — ${currentTrack.artist}`"
+      @close="showLyrics = false"
+    >
+      <p v-if="lyricsState === 'loading'" class="lyrics-status">Loading lyrics…</p>
+      <p v-else-if="lyricsState === 'empty'" class="lyrics-status">No lyrics found.</p>
+      <p v-else-if="lyricsState === 'error'" class="lyrics-status">Couldn't load lyrics.</p>
+      <pre v-else class="lyrics-text">{{ lyricsText }}</pre>
+    </Modal>
   </div>
 </template>
 
@@ -164,5 +206,17 @@ function formatTime(sec: number): string {
     min-width: 0;
     max-width: 6rem;
   }
+}
+
+.lyrics-status {
+  opacity: 0.7;
+  text-align: center;
+  padding: 1rem 0;
+}
+.lyrics-text {
+  white-space: pre-wrap;
+  font-family: inherit;
+  line-height: 1.6;
+  text-align: center;
 }
 </style>

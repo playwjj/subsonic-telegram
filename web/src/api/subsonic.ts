@@ -269,6 +269,18 @@ export async function setRating(songId: string, rating: number): Promise<void> {
   await call("setRating", { id: songId, rating });
 }
 
+export interface Lyrics {
+  artist?: string;
+  title?: string;
+  // Absent when no exact match was found (see getLyrics in src/index.ts).
+  value?: string;
+}
+
+export async function getLyrics(artist: string, title: string): Promise<Lyrics> {
+  const body = await call<{ lyrics: Lyrics }>("getLyrics", { artist, title });
+  return body.lyrics;
+}
+
 export interface FolderDir {
   name: string;
   // Whether deleteFolder would actually succeed on this one — see getFolder
