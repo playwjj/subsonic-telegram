@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { playerState, currentTrack, toggle, next, prev, seek } from "../stores/player";
 import { coverArtUrl, star, unstar } from "../api/subsonic";
+import StarRating from "./StarRating.vue";
 
 function onSeek(e: Event) {
   seek(Number((e.target as HTMLInputElement).value));
@@ -48,6 +49,7 @@ function formatTime(sec: number): string {
     >
       {{ starred ? "♥" : "♡" }}
     </button>
+    <StarRating :song="currentTrack" />
     <div class="controls">
       <button @click="prev">⏮</button>
       <button class="play-pause" @click="toggle">{{ playerState.isPlaying ? "⏸" : "▶" }}</button>

@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS tracks (
   source_path  TEXT,            -- path relative to the local music dir at import time, if known;
                                  -- lets scripts/import-m3u.ts match .m3u entries to a track
   play_count   INTEGER NOT NULL DEFAULT 0,
-  last_played  INTEGER          -- unix seconds, set by the scrobble endpoint
+  last_played  INTEGER,         -- unix seconds, set by the scrobble endpoint
+  rating       INTEGER NOT NULL DEFAULT 0 -- 0-5 stars, set by the setRating endpoint; 0 = unrated
 );
 CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album_id);
 CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist_id);

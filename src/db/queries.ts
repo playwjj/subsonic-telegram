@@ -41,6 +41,7 @@ export interface TrackRow {
   play_count: number;
   last_played: number | null;
   source_path: string | null;
+  rating: number;
 }
 
 const ARTIST_SELECT = `
@@ -376,6 +377,10 @@ export async function scrobble(db: D1Database, trackId: string, playedAt: number
     .prepare(`UPDATE tracks SET play_count = play_count + 1, last_played = ? WHERE id = ?`)
     .bind(playedAt, trackId)
     .run();
+}
+
+export async function setRating(db: D1Database, trackId: string, rating: number): Promise<void> {
+  await db.prepare(`UPDATE tracks SET rating = ? WHERE id = ?`).bind(rating, trackId).run();
 }
 
 export type StarredItemType = "artist" | "album" | "track";

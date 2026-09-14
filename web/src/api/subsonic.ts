@@ -116,6 +116,7 @@ export interface Song {
   artistId: string;
   type: string;
   starred?: string;
+  userRating?: number;
 }
 
 export interface ArtistDetail extends Artist {
@@ -262,6 +263,10 @@ export async function star(songId: string): Promise<void> {
 
 export async function unstar(songId: string): Promise<void> {
   await call("unstar", { id: songId });
+}
+
+export async function setRating(songId: string, rating: number): Promise<void> {
+  await call("setRating", { id: songId, rating });
 }
 
 export interface FolderDir {
