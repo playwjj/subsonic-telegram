@@ -6,6 +6,7 @@ import { artistNode, albumNode, songNode, playlistNode, playlistEntryNode } from
 import * as browsing from "./subsonic/browsing";
 import * as media from "./subsonic/media";
 import * as q from "./db/queries";
+import { fetchLyrics } from "./lyrics";
 import { TelegramStorage } from "./storage/telegram";
 import { CachedStorage } from "./storage/cached";
 import type { StorageBackend } from "./storage/types";
@@ -329,6 +330,17 @@ export default {
         const rating = Math.max(0, Math.min(5, Math.floor(Number(ratingParam))));
         await q.setRating(env.DB, id, rating);
         return respond(subsonicSuccess(), format);
+      }
+
+      case "getLyrics": {
+        const artist = params.get("artist")?.trim();
+        const title = params.get("title")?.trim();
+        if (!artist || !title) return respond(subsonicSuccess(node("lyrics", {})), format);
+        const lyrics = await fetchLyrics(artist, title);
+        return respond(
+          subsonicSuccess(node("lyrics", { artist, title }, lyrics ? { text: lyrics } : undefined)),
+          format,
+        );
       }
 
       case "star":
