@@ -57,7 +57,7 @@ ul {
 li {
   display: flex;
   justify-content: space-between;
-  padding: 0.5rem 0;
+  padding: .8rem 0.5rem;
 }
 li + li {
   border-top: 1px solid var(--border);
