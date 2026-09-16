@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { star, unstar, type Song } from "../api/subsonic";
+import { coverArtUrl, star, unstar, type Song } from "../api/subsonic";
 import AddToPlaylistMenu from "./AddToPlaylistMenu.vue";
 import StarRating from "./StarRating.vue";
 
@@ -37,6 +37,13 @@ function formatDuration(sec?: number): string {
 
 <template>
   <div class="track-row">
+    <img
+      v-if="song.coverArt"
+      class="cover"
+      :src="coverArtUrl(song.coverArt)"
+      :alt="`${song.album} cover`"
+      @error="($event.target as HTMLImageElement).style.display = 'none'"
+    />
     <button class="play-btn" title="Play" @click="emit('play')">▶</button>
     <div class="info">
       <div class="title">{{ song.title }}</div>
@@ -66,6 +73,14 @@ function formatDuration(sec?: number): string {
 }
 .track-row + .track-row {
   border-top: 1px solid var(--border);
+}
+.cover {
+  width: 3rem;
+  height: 3rem;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--surface-hover);
+  flex-shrink: 0;
 }
 .play-btn {
   display: flex;
