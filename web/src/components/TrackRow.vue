@@ -37,6 +37,7 @@ function formatDuration(sec?: number): string {
 
 <template>
   <div class="track-row">
+    <button class="play-btn" title="Play" @click="emit('play')">▶</button>
     <img
       v-if="song.coverArt"
       class="cover"
@@ -44,7 +45,6 @@ function formatDuration(sec?: number): string {
       :alt="`${song.album} cover`"
       @error="($event.target as HTMLImageElement).style.display = 'none'"
     />
-    <button class="play-btn" title="Play" @click="emit('play')">▶</button>
     <div class="info">
       <div class="title">{{ song.title }}</div>
       <div class="artist">{{ song.artist }}</div>
