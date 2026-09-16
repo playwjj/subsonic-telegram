@@ -185,7 +185,7 @@ export default {
       case "getCoverArt": {
         const id = params.get("id");
         if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
-        return media.getCoverArt(env.DB, storage, id);
+        return media.getCoverArt(env.DB, storage, env.ASSETS, id);
       }
 
       case "getPlaylists": {

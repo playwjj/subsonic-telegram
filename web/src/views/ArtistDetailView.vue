@@ -20,7 +20,10 @@ watch(() => props.id, load, { immediate: true });
 
 <template>
   <div v-if="artist" class="artist-detail">
-    <h1>{{ artist.name }}</h1>
+    <div class="artist-header">
+      <img v-if="artist.coverArt" :src="coverArtUrl(artist.coverArt)" :alt="`${artist.name} cover`" />
+      <h1>{{ artist.name }}</h1>
+    </div>
     <div class="albums">
       <RouterLink
         v-for="al in artist.album"
@@ -44,6 +47,18 @@ watch(() => props.id, load, { immediate: true });
   grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
   gap: 1rem;
   margin-top: 1rem;
+}
+.artist-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.artist-header img {
+  width: 4rem;
+  height: 4rem;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--surface-hover);
 }
 .album-card {
   color: inherit;

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { getArtists, type ArtistIndex } from "../api/subsonic";
+import { coverArtUrl, getArtists, type ArtistIndex } from "../api/subsonic";
 
 const indexes = ref<ArtistIndex[]>([]);
 const loading = ref(true);
@@ -27,7 +27,10 @@ onMounted(async () => {
       <h2>{{ group.name }}</h2>
       <ul>
         <li v-for="a in group.artist" :key="a.id">
-          <RouterLink :to="{ name: 'artist', params: { id: a.id } }">{{ a.name }}</RouterLink>
+          <RouterLink :to="{ name: 'artist', params: { id: a.id } }" class="artist-link">
+            <img v-if="a.coverArt" :src="coverArtUrl(a.coverArt)" :alt="`${a.name} cover`" />
+            <span>{{ a.name }}</span>
+          </RouterLink>
           <span class="count">{{ a.albumCount }}</span>
         </li>
       </ul>
@@ -52,6 +55,7 @@ ul {
 li {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   padding: 0.4rem 0;
 }
 li + li {
@@ -60,5 +64,19 @@ li + li {
 .count {
   opacity: 0.6;
   font-size: 0.85rem;
+}
+.artist-link {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+.artist-link img {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--surface-hover);
+  flex-shrink: 0;
 }
 </style>
