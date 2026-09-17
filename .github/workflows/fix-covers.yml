@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "0 2 * * *"
   workflow_dispatch:
+    inputs:
+      since_hours:
+        description: "Only check data updated within this many hours"
+        required: true
+        default: "48"
+        type: number
 
 jobs:
   fix-covers:
@@ -31,4 +37,4 @@ jobs:
         run: npm ci
 
       - name: Fix missing covers in remote D1
-        run: npm run fix-covers:remote
+        run: npm run fix-covers:remote -- --since-hours=${{ inputs.since_hours || '48' }}
