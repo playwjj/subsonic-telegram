@@ -82,6 +82,7 @@ npm run db:migrate:remote
 | `db/schema.sql` | D1 表结构 |
 | `scripts/import.ts` | 本地导入脚本：扫描本地音乐目录，读 tag，传 Telegram，写 D1 |
 | `scripts/import-m3u.ts` | 从本地 `.m3u`/`.m3u8` 文件建/更新 Subsonic playlist |
+| `scripts/fix-covers-remote.ts` | GitHub Actions 专用入口：从远程 D1 修复缺失封面，不读取本地音乐文件 |
 | `web/` | 自带的 Web UI（Vue 3 + Vite），打包后由 Workers Static Assets 跟 API 一起提供，见下面 [Web UI](#web-ui) |
 
 ## 已实现的端点
@@ -215,6 +216,12 @@ npm run import-m3u -- /path/to/playlist.m3u
 ```
 
 原理是拿 `.m3u` 里列的每个文件路径，换算成相对 `LOCAL_MUSIC_DIR`（或 `--music-dir=` 指定的目录）的路径，去 D1 按 `source_path` 精确匹配已导入的 track——**所以 `.m3u` 里引用的歌必须先用 `npm run import` 导入过**，没导入的会在结尾列出来，提示去先导入。重跑同一个 `.m3u` 文件会更新同名 playlist（按名字算出固定 id），不会重复建。
+
+### 自动修复封面
+
+`.github/workflows/fix-covers.yml` 会每天 UTC 时间 02:00 运行，也可以在 GitHub Actions 页面手动触发。它调用独立的 `fix-covers:remote` 脚本，只检查最近 48 小时创建的专辑/歌曲的 D1 `cover_ref`，不会读取本地音乐目录或 `.cover-fix-state.json`；每次都以 D1 为准。
+
+启用 workflow 前，请在仓库 Secrets 中添加：`TG_BOT_TOKEN`、`TG_CHANNEL_ID`、`CF_ACCOUNT_ID`、`CF_API_TOKEN` 和 `D1_DATABASE_ID`。Cloudflare API Token 需要有查询目标 D1 数据库的权限。
 
 ## Web UI
 

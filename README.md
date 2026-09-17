@@ -83,6 +83,7 @@ Redeploy and the cache is live. There's no size limit on the library itself — 
 | `db/schema.sql` | D1 table definitions |
 | `scripts/import.ts` | Local import script: scans a local music directory, reads tags, uploads to Telegram, writes to D1 |
 | `scripts/import-m3u.ts` | Builds/updates Subsonic playlists from local `.m3u`/`.m3u8` files |
+| `scripts/fix-covers-remote.ts` | GitHub Actions entry point for repairing missing covers from remote D1 without reading local music files |
 | `web/` | The bundled Web UI (Vue 3 + Vite), served alongside the API by Workers Static Assets once built — see [Web UI](#web-ui) below |
 
 ## Implemented endpoints
@@ -216,6 +217,12 @@ npm run import-m3u -- /path/to/playlist.m3u
 ```
 
 This works by taking each file path listed in the `.m3u`, converting it to a path relative to `LOCAL_MUSIC_DIR` (or the directory given via `--music-dir=`), and matching it against already-imported tracks in D1 by exact `source_path`. **So any song referenced in the `.m3u` must already have been imported via `npm run import`** — anything not yet imported gets listed at the end, prompting you to import it first. Re-running the same `.m3u` file updates the same-named playlist (its id is derived deterministically from the name), rather than creating a duplicate.
+
+### Automatic cover repair
+
+The GitHub Actions workflow `.github/workflows/fix-covers.yml` runs daily at 02:00 UTC and can also be started manually. It invokes the separate `fix-covers:remote` script, which checks only albums/tracks created in the last 48 hours, checks D1 `cover_ref` values, and never reads a local music directory or `.cover-fix-state.json`; D1 is the source of truth on every run.
+
+Add these repository secrets before enabling the workflow: `TG_BOT_TOKEN`, `TG_CHANNEL_ID`, `CF_ACCOUNT_ID`, `CF_API_TOKEN`, and `D1_DATABASE_ID`. The Cloudflare API token needs permission to query the target D1 database.
 
 ## Web UI
 

@@ -21,7 +21,8 @@
     "db:migrate:remote": "wrangler d1 execute subsonic-telegram --remote --file=./db/schema.sql",
     "import": "tsx scripts/import.ts",
     "import-m3u": "tsx scripts/import-m3u.ts",
-    "fix-covers": "tsx scripts/fix-covers.ts"
+    "fix-covers": "tsx scripts/fix-covers.ts",
+    "fix-covers:remote": "tsx scripts/fix-covers-remote.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260911.1",
