@@ -8,7 +8,7 @@
 // are never touched.
 //
 // Usage:
-//   npm run fix-covers -- [--limit=N] [--force] [--dry-run] [--retry-failed] [--loose-fallback] [--fallback-cover]
+//   npm run fix-covers -- [--limit=N] [--album-id=ID] [--force] [--dry-run] [--retry-failed] [--loose-fallback] [--fallback-cover]
 //
 // Tries an album-level match first (artist + album name). A lot of this
 // library's "albums" are actually a single artist's unrelated singles
@@ -45,6 +45,7 @@ import { parseFile } from "music-metadata";
 import * as OpenCC from "opencc-js";
 
 const REMOTE_ONLY = process.argv.includes("--remote");
+const TARGET_ALBUM_ID = process.argv.find((a) => a.startsWith("--album-id="))?.slice("--album-id=".length) ?? null;
 const SINCE_HOURS = (() => {
   const arg = process.argv.find((a) => a.startsWith("--since-hours="));
   return arg ? Number(arg.slice("--since-hours=".length)) : 48;
@@ -533,14 +534,23 @@ async function fetchAlbums(): Promise<Album[]> {
          WHERE recent_tracks.album_id = albums.id AND recent_tracks.created_at >= ?
        )`
     : "";
+  const filters = TARGET_ALBUM_ID
+    ? `WHERE albums.id = ?${REMOTE_ONLY ? " AND (albums.created_at >= ? OR EXISTS (SELECT 1 FROM tracks recent_tracks WHERE recent_tracks.album_id = albums.id AND recent_tracks.created_at >= ?))" : ""}`
+    : recentFilter;
   return d1<Album>(
     `SELECT albums.id, albums.name, artists.name AS artist_name, albums.cover_ref,
             (SELECT t.source_path FROM tracks t
              WHERE t.album_id = albums.id AND t.source_path IS NOT NULL LIMIT 1) AS sample_source_path
      FROM albums JOIN artists ON artists.id = albums.artist_id
-     ${recentFilter}
+     ${filters}
      ORDER BY albums.name`,
-    REMOTE_ONLY ? [cutoff, cutoff] : [],
+    TARGET_ALBUM_ID
+      ? REMOTE_ONLY
+        ? [TARGET_ALBUM_ID, cutoff, cutoff]
+        : [TARGET_ALBUM_ID]
+      : REMOTE_ONLY
+        ? [cutoff, cutoff]
+        : [],
   );
 }
 
