@@ -8,7 +8,7 @@ import {
   deletePlaylist,
   type PlaylistDetail,
 } from "../api/subsonic";
-import { playQueue } from "../stores/player";
+import { playQueue, shufflePlay } from "../stores/player";
 import TrackRow from "../components/TrackRow.vue";
 
 const props = defineProps<{ id: string }>();
@@ -58,6 +58,7 @@ async function removePlaylist() {
       <h1>{{ playlist.name }}</h1>
       <div class="actions">
         <button @click="playFrom(0)">▶ Play all</button>
+        <button :disabled="!playlist.entry.length" @click="shufflePlay(playlist.entry)">🔀 Shuffle</button>
         <button class="danger" @click="removePlaylist">Delete</button>
       </div>
     </div>

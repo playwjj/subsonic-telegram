@@ -258,6 +258,21 @@ export async function scrobble(id: string): Promise<void> {
   await call("scrobble", { id });
 }
 
+export interface PlayQueue {
+  entry: Song[];
+  current?: string;
+  position?: number;
+}
+
+export async function getPlayQueue(): Promise<PlayQueue> {
+  const body = await call<{ playQueue: Partial<PlayQueue> }>("getPlayQueue");
+  return { ...body.playQueue, entry: body.playQueue.entry ?? [] };
+}
+
+export async function savePlayQueue(ids: string[], current: string, positionMs: number): Promise<void> {
+  await call("savePlayQueue", { id: ids, current, position: positionMs });
+}
+
 export async function star(songId: string): Promise<void> {
   await call("star", { id: songId });
 }

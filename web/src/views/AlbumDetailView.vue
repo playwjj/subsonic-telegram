@@ -2,7 +2,7 @@
 import { ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { getAlbum, deleteTrack, coverArtUrl, type AlbumDetail, type Song } from "../api/subsonic";
-import { playQueue } from "../stores/player";
+import { playQueue, shufflePlay } from "../stores/player";
 import TrackRow from "../components/TrackRow.vue";
 
 const props = defineProps<{ id: string }>();
@@ -48,7 +48,10 @@ async function handleDelete(song: Song) {
         <h1>{{ album.name }}</h1>
         <RouterLink :to="{ name: 'artist', params: { id: album.artistId } }">{{ album.artist }}</RouterLink>
         <p class="meta">{{ album.songCount }} 首{{ album.year ? ` · ${album.year}` : "" }}</p>
-        <button @click="playFrom(0)">▶ Play album</button>
+        <div class="flex gap-2">
+          <button @click="playFrom(0)">▶ Play album</button>
+          <button @click="shufflePlay(album.song)">🔀 Shuffle</button>
+        </div>
       </div>
     </div>
     <div class="tracks glass p-2">

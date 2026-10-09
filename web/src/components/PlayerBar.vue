@@ -1,6 +1,17 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { playerState, currentTrack, toggle, next, prev, seek } from "../stores/player";
+import { computed, onMounted, ref, watch } from "vue";
+import {
+  playerState,
+  currentTrack,
+  toggle,
+  next,
+  prev,
+  seek,
+  toggleShuffle,
+  cycleRepeat,
+  setVolume,
+  restoreQueue,
+} from "../stores/player";
 import { coverArtUrl, star, unstar, getLyrics } from "../api/subsonic";
 import StarRating from "./StarRating.vue";
 import Modal from "./Modal.vue";
@@ -8,6 +19,31 @@ import Modal from "./Modal.vue";
 function onSeek(e: Event) {
   seek(Number((e.target as HTMLInputElement).value));
 }
+
+function onVolume(e: Event) {
+  setVolume(Number((e.target as HTMLInputElement).value));
+}
+
+// Remembers the pre-mute level so unmuting goes back to it, not to 100%.
+let volumeBeforeMute = 1;
+function toggleMute() {
+  if (playerState.volume > 0) {
+    volumeBeforeMute = playerState.volume;
+    setVolume(0);
+  } else {
+    setVolume(volumeBeforeMute || 1);
+  }
+}
+
+const repeatTitle = computed(
+  () => ({ off: "Repeat: off", all: "Repeat: all", one: "Repeat: one" })[playerState.repeat],
+);
+
+// Only mounted once logged in, so this is the first point the saved queue
+// can be fetched.
+onMounted(() => {
+  void restoreQueue();
+});
 
 const starred = computed(() => !!currentTrack.value?.starred);
 
@@ -82,9 +118,25 @@ function formatTime(sec: number): string {
     <StarRating :song="currentTrack" />
     <button class="heart-btn" title="Lyrics" @click="openLyrics">🎤</button>
     <div class="controls">
+      <button
+        class="mode-btn"
+        :class="{ active: playerState.shuffle }"
+        :title="playerState.shuffle ? 'Shuffle: on' : 'Shuffle: off'"
+        @click="toggleShuffle"
+      >
+        🔀
+      </button>
       <button @click="prev">⏮</button>
       <button class="play-pause" @click="toggle">{{ playerState.isPlaying ? "⏸" : "▶" }}</button>
       <button @click="next">⏭</button>
+      <button
+        class="mode-btn"
+        :class="{ active: playerState.repeat !== 'off' }"
+        :title="repeatTitle"
+        @click="cycleRepeat"
+      >
+        {{ playerState.repeat === "one" ? "🔂" : "🔁" }}
+      </button>
     </div>
     <span class="time">{{ formatTime(playerState.currentTime) }}</span>
     <input
@@ -96,6 +148,12 @@ function formatTime(sec: number): string {
       @input="onSeek"
     />
     <span class="time">{{ formatTime(playerState.duration) }}</span>
+    <div class="volume">
+      <button class="heart-btn" :title="playerState.volume > 0 ? 'Mute' : 'Unmute'" @click="toggleMute">
+        {{ playerState.volume === 0 ? "🔇" : playerState.volume < 0.5 ? "🔉" : "🔊" }}
+      </button>
+      <input type="range" min="0" max="1" step="0.01" :value="playerState.volume" @input="onVolume" />
+    </div>
 
     <Modal
       v-if="showLyrics"
@@ -190,6 +248,22 @@ function formatTime(sec: number): string {
 .play-pause {
   font-size: 1.3rem;
 }
+.controls .mode-btn {
+  font-size: 0.95rem;
+  opacity: 0.4;
+}
+.controls .mode-btn.active {
+  opacity: 1;
+}
+.volume {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+.volume input {
+  width: 5rem;
+}
 .seek {
   flex: 1;
   min-width: 3rem;
@@ -202,6 +276,10 @@ function formatTime(sec: number): string {
 }
 
 @media (max-width: 600px) {
+  /* Phones use hardware volume buttons; the slider just eats seek-bar room. */
+  .volume {
+    display: none;
+  }
   .meta {
     min-width: 0;
     max-width: 6rem;
