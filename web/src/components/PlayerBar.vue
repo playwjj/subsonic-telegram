@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import {
   playerState,
   currentTrack,
@@ -11,6 +11,9 @@ import {
   cycleRepeat,
   setVolume,
   restoreQueue,
+  jumpTo,
+  removeFromQueue,
+  clearQueue,
 } from "../stores/player";
 import { coverArtUrl, star, unstar, getLyrics } from "../api/subsonic";
 import StarRating from "./StarRating.vue";
@@ -33,6 +36,20 @@ function toggleMute() {
   } else {
     setVolume(volumeBeforeMute || 1);
   }
+}
+
+const showQueue = ref(false);
+const queueList = ref<HTMLElement | null>(null);
+
+async function openQueue() {
+  showQueue.value = true;
+  await nextTick();
+  queueList.value?.querySelector(".queue-item.current")?.scrollIntoView({ block: "center" });
+}
+
+function handleClearQueue() {
+  showQueue.value = false;
+  clearQueue();
 }
 
 const repeatTitle = computed(
@@ -117,6 +134,7 @@ function formatTime(sec: number): string {
     </button>
     <StarRating :song="currentTrack" />
     <button class="heart-btn" title="Lyrics" @click="openLyrics">🎤</button>
+    <button class="heart-btn" title="Queue" @click="openQueue">☰</button>
     <div class="controls">
       <button
         class="mode-btn"
@@ -164,6 +182,29 @@ function formatTime(sec: number): string {
       <p v-else-if="lyricsState === 'empty'" class="lyrics-status">No lyrics found.</p>
       <p v-else-if="lyricsState === 'error'" class="lyrics-status">Couldn't load lyrics.</p>
       <pre v-else class="lyrics-text">{{ lyricsText }}</pre>
+    </Modal>
+
+    <Modal v-if="showQueue" :title="`Queue · ${playerState.queue.length}`" @close="showQueue = false">
+      <div class="queue-actions">
+        <button @click="handleClearQueue">Clear queue</button>
+      </div>
+      <ol ref="queueList" class="queue-list">
+        <li
+          v-for="(song, i) in playerState.queue"
+          :key="`${song.id}-${i}`"
+          class="queue-item"
+          :class="{ current: i === playerState.currentIndex, played: i < playerState.currentIndex }"
+        >
+          <button class="queue-jump" @click="jumpTo(i)">
+            <span class="queue-index">{{ i === playerState.currentIndex ? "▶" : i + 1 }}</span>
+            <span class="queue-meta">
+              <span class="queue-title">{{ song.title }}</span>
+              <span class="queue-artist">{{ song.artist }}</span>
+            </span>
+          </button>
+          <button class="heart-btn" title="Remove from queue" @click="removeFromQueue(i)">✕</button>
+        </li>
+      </ol>
     </Modal>
   </div>
 </template>
@@ -284,6 +325,65 @@ function formatTime(sec: number): string {
     min-width: 0;
     max-width: 6rem;
   }
+}
+
+.queue-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.5rem;
+}
+.queue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.queue-item {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 6px;
+}
+.queue-item.current {
+  background: var(--surface-hover);
+}
+.queue-item.played {
+  opacity: 0.5;
+}
+.queue-jump {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.5rem;
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.queue-index {
+  width: 1.75rem;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+.queue-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.queue-title,
+.queue-artist {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.queue-artist {
+  font-size: 0.8rem;
+  opacity: 0.7;
 }
 
 .lyrics-status {

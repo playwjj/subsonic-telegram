@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { coverArtUrl, star, unstar, type Song } from "../api/subsonic";
 import AddToPlaylistMenu from "./AddToPlaylistMenu.vue";
+import QueueMenu from "./QueueMenu.vue";
 import StarRating from "./StarRating.vue";
 
 // `deletable` is opt-in per view: library views (Songs/Album/Folders) show a
@@ -59,6 +60,7 @@ function formatDuration(sec?: number): string {
     >
       {{ starred ? "♥" : "♡" }}
     </button>
+    <QueueMenu :song="song" />
     <AddToPlaylistMenu :song-id="song.id" />
     <button v-if="deletable" class="delete-btn" title="Delete permanently" @click="emit('delete')">🗑</button>
   </div>

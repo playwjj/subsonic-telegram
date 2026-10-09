@@ -210,6 +210,73 @@ export function prev(): void {
   loadCurrent();
 }
 
+// --- queue editing (queue panel, "Play next"/"Add to queue" on track rows) ---
+
+// Both start playback when nothing is queued yet, rather than silently
+// building a queue the user can't see playing.
+export function playNext(song: Song): void {
+  if (state.queue.length === 0) return playQueue([song]);
+  const current = state.queue[state.currentIndex];
+  state.queue = [...state.queue.slice(0, state.currentIndex + 1), song, ...state.queue.slice(state.currentIndex + 1)];
+  if (state.shuffle) {
+    // Mirror the insert into the unshuffled order too, after the same
+    // track, so it's still "next" if shuffle gets turned off.
+    const at = state.originalQueue.indexOf(current) + 1;
+    state.originalQueue = [...state.originalQueue.slice(0, at), song, ...state.originalQueue.slice(at)];
+  } else {
+    state.originalQueue = state.queue;
+  }
+  persistQueue();
+}
+
+export function addToQueue(song: Song): void {
+  if (state.queue.length === 0) return playQueue([song]);
+  state.queue = [...state.queue, song];
+  state.originalQueue = state.shuffle ? [...state.originalQueue, song] : state.queue;
+  persistQueue();
+}
+
+export function jumpTo(index: number): void {
+  if (index < 0 || index >= state.queue.length) return;
+  state.currentIndex = index;
+  loadCurrent();
+}
+
+export function removeFromQueue(index: number): void {
+  const removed = state.queue[index];
+  if (!removed) return;
+  state.queue = state.queue.filter((_, i) => i !== index);
+  state.originalQueue = state.shuffle ? state.originalQueue.filter((t) => t !== removed) : state.queue;
+  if (state.queue.length === 0) {
+    clearQueue();
+    return;
+  }
+  if (index < state.currentIndex) {
+    state.currentIndex--;
+  } else if (index === state.currentIndex) {
+    // Removing what's playing moves on to whatever slid into its slot
+    // (or the new last track), keeping the play/pause state.
+    const wasPlaying = state.isPlaying;
+    state.currentIndex = Math.min(index, state.queue.length - 1);
+    loadCurrent(wasPlaying);
+    return;
+  }
+  persistQueue();
+}
+
+export function clearQueue(): void {
+  clearTimeout(scrobbleTimer);
+  audio.pause();
+  audio.removeAttribute("src");
+  audio.load();
+  state.queue = [];
+  state.originalQueue = [];
+  state.currentIndex = -1;
+  state.currentTime = 0;
+  state.duration = 0;
+  persistQueue();
+}
+
 export function seek(time: number): void {
   audio.currentTime = time;
 }
@@ -230,7 +297,10 @@ function persistQueue(): void {
   clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
     const current = state.queue[state.currentIndex];
-    if (!current) return;
+    if (!current) {
+      void savePlayQueue([], undefined, 0).catch(() => {});
+      return;
+    }
     const start = Math.max(
       0,
       Math.min(state.currentIndex - MAX_SAVED_QUEUE / 2, state.queue.length - MAX_SAVED_QUEUE),

@@ -11,6 +11,7 @@ const navLinks = [
   { to: "/artists", label: "Artists" },
   { to: "/songs", label: "Songs" },
   { to: "/folders", label: "Folders" },
+  { to: "/favorites", label: "Favorites" },
   { to: "/search", label: "Search" },
   { to: "/playlists", label: "Playlists" },
   { to: "/upload", label: "Upload" },

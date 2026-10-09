@@ -227,9 +227,9 @@ npm run import-m3u -- /path/to/playlist.m3u
 
 `web/` 是一个 Vue 3 + Vite 单页应用，直接调 `/rest/*` API（跟第三方 Subsonic 客户端走的是同一套接口），提供浏览歌库、播放、管理 playlist 的界面，另外还支持在浏览器里逐首上传/删除歌曲、创建/改名/删除文件夹（批量导入还是交给上面的 CLI 脚本），细节见下面的[从 Web UI 管理歌库](#从-web-ui-管理歌库)。
 
-**页面**：Home（库统计 + 最近新增/最近播放/最多播放）、Artists（按 ID3 艺人/专辑浏览）、Songs（扁平化全曲目列表，支持排序分页）、Folders（按导入时的本地文件夹结构浏览，见下）、Search、Playlists。
+**页面**：Home（库统计 + 最近新增/最近播放/最多播放）、Artists（按 ID3 艺人/专辑浏览）、Songs（扁平化全曲目列表，支持排序分页）、Folders（按导入时的本地文件夹结构浏览，见下）、Favorites（通过 `getStarred2` 列出收藏的歌曲/专辑/艺人，可全部播放或随机播放）、Search、Playlists。
 
-**播放器**：支持随机播放（播放条上的 🔀，或者专辑/歌单页的「🔀 Shuffle」——从随机一首开始；关掉随机会恢复原顺序）、循环（关/列表/单曲）和音量调节（随机/循环/音量设置存在 `localStorage`）。播放队列会通过 `savePlayQueue` 同步到服务端，打开页面时用 `getPlayQueue` 恢复到上次的歌和进度（暂停状态），刷新页面或者从别的 Subsonic 客户端过来都能续播；因为所有 id 都要拼进 URL 查询参数，只保存当前曲目前后共 200 首的窗口。锁屏/通知栏控制和键盘媒体键走的是 Media Session API。
+**播放器**：支持随机播放（播放条上的 🔀，或者专辑/歌单页的「🔀 Shuffle」——从随机一首开始；关掉随机会恢复原顺序）、循环（关/列表/单曲）和音量调节（随机/循环/音量设置存在 `localStorage`）。播放队列会通过 `savePlayQueue` 同步到服务端，打开页面时用 `getPlayQueue` 恢复到上次的歌和进度（暂停状态），刷新页面或者从别的 Subsonic 客户端过来都能续播；因为所有 id 都要拼进 URL 查询参数，只保存当前曲目前后共 200 首的窗口。锁屏/通知栏控制和键盘媒体键走的是 Media Session API。播放条上的 ☰ 打开播放队列（点任意一首跳过去播、移除单首或清空队列）；每一行歌曲的 ⋯ 菜单里有「Play next」（下一首播放）和「Add to queue」（加到队列末尾）。
 
 **Folders 是什么**：按 `source_path`（`npm run import` 记录的、相对导入根目录的路径）还原出原始文件夹树，跟 Artists 那种按 ID3 标签分组的浏览方式并列存在。对那些"合集"文件夹（比如按月份存的热歌榜）特别有用——这类文件夹里每首歌的 ID3 艺人标签都不一样，按 Artists 浏览会被打散到几十上百个艺人名下，按 Folders 浏览则完全保留原来"一个文件夹一份合集"的样子。对应的后端接口是 `getFolder`（`src/index.ts`），跟 `getLibraryStats`/`getSongs`/`getRecentlyPlayed`/`getMostPlayed` 一样，都不是 Subsonic 官方协议的一部分，只服务于这个项目自己的 Web UI。
 

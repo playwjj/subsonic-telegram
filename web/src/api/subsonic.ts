@@ -269,8 +269,19 @@ export async function getPlayQueue(): Promise<PlayQueue> {
   return { ...body.playQueue, entry: body.playQueue.entry ?? [] };
 }
 
-export async function savePlayQueue(ids: string[], current: string, positionMs: number): Promise<void> {
+export async function savePlayQueue(ids: string[], current: string | undefined, positionMs: number): Promise<void> {
   await call("savePlayQueue", { id: ids, current, position: positionMs });
+}
+
+export interface Starred {
+  artist: Artist[];
+  album: Album[];
+  song: Song[];
+}
+
+export async function getStarred2(): Promise<Starred> {
+  const body = await call<{ starred2: Partial<Starred> }>("getStarred2");
+  return { artist: body.starred2.artist ?? [], album: body.starred2.album ?? [], song: body.starred2.song ?? [] };
 }
 
 export async function star(songId: string): Promise<void> {
