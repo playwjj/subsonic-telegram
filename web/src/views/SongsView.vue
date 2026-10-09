@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import { getSongs, deleteTrack, type Song, type SongSort } from "../api/subsonic";
+import { getSongs, getShuffleSongs, deleteTrack, type Song, type SongSort } from "../api/subsonic";
+import ShuffleButton from "../components/ShuffleButton.vue";
 import { playQueue } from "../stores/player";
 import TrackRow from "../components/TrackRow.vue";
 
@@ -39,6 +40,7 @@ async function handleDelete(song: Song) {
   <div>
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <h1 class="text-xl font-semibold">Songs</h1>
+      <ShuffleButton class="ml-auto text-sm" label="Shuffle all" :load="() => getShuffleSongs()" />
       <select :value="sort" class="text-sm" @change="changeSort(($event.target as HTMLSelectElement).value as SongSort)">
         <option value="title">Title</option>
         <option value="artist">Artist</option>

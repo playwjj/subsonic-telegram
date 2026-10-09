@@ -44,6 +44,7 @@ function attrsToJSON(attrs?: SNode["attrs"]): Record<string, unknown> {
 
 export function toJSON(root: SNode): unknown {
   function conv(n: SNode): unknown {
+    if (n.scalar) return n.text;
     const out: Record<string, unknown> = attrsToJSON(n.attrs);
     if (n.text !== undefined) out.value = n.text;
     if (n.single) for (const [key, child] of Object.entries(n.single)) out[key] = conv(child);

@@ -20,7 +20,10 @@ export async function getCoverArt(
 ): Promise<Response> {
   const placeholder = () => assets.fetch(new Request("https://subsonic-telegram.invalid/music-cover.jpg"));
   const album = await q.getAlbum(db, id);
-  const coverRef = album?.cover_ref ?? (await q.getTrack(db, id))?.cover_ref;
+  // Album, track and artist ids are md5s of different natural keys, so one
+  // id never matches more than one of these.
+  const coverRef =
+    album?.cover_ref ?? (await q.getTrack(db, id))?.cover_ref ?? (album ? null : await q.getArtistCoverRef(db, id));
   if (!coverRef) return placeholder();
 
   const response = await storage.getFileResponse(coverRef, null);

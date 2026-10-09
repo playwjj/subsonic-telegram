@@ -1,7 +1,7 @@
 import type { Env } from "./types";
 import { authenticate } from "./auth";
 import { respond, subsonicError, subsonicSuccess, openSubsonicExtensionsResponse } from "./subsonic/response";
-import { node } from "./subsonic/node";
+import { node, scalarNode } from "./subsonic/node";
 import {
   artistNode,
   albumNode,
@@ -126,6 +126,39 @@ export default {
         const result = await browsing.getArtist(env.DB, auth.username, id);
         if (!result) return respond(subsonicError(ERR.NOT_FOUND, "Artist not found"), format);
         return respond(subsonicSuccess(result), format);
+      }
+
+      // No biography/similar-artist source (that's Last.fm on real servers),
+      // so this only carries image URLs. They point back at getCoverArt
+      // with the caller's own auth params: clients load these as plain
+      // image URLs without adding credentials, and getCoverArt (unlike real
+      // servers' public image endpoints) requires them.
+      case "getArtistInfo":
+      case "getArtistInfo2": {
+        const id = params.get("id");
+        if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
+        const artist = await q.getArtist(env.DB, id);
+        if (!artist) return respond(subsonicError(ERR.NOT_FOUND, "Artist not found"), format);
+        const imageUrl = (size: number) => {
+          const imageParams = new URLSearchParams({ id: artist.id, size: String(size) });
+          for (const key of ["u", "t", "s", "p", "v", "c"]) {
+            const value = params.get(key);
+            if (value !== null) imageParams.set(key, value);
+          }
+          return `${url.origin}/rest/getCoverArt.view?${imageParams}`;
+        };
+        return respond(
+          subsonicSuccess(
+            node(endpoint === "getArtistInfo" ? "artistInfo" : "artistInfo2", undefined, {
+              single: {
+                smallImageUrl: scalarNode("smallImageUrl", imageUrl(150)),
+                mediumImageUrl: scalarNode("mediumImageUrl", imageUrl(300)),
+                largeImageUrl: scalarNode("largeImageUrl", imageUrl(600)),
+              },
+            }),
+          ),
+          format,
+        );
       }
 
       case "getAlbum": {
@@ -541,6 +574,33 @@ export default {
         return respond(
           subsonicSuccess(
             node(tag, undefined, { lists: { song: tracks.map((t) => songNode(t, { starredAt: starred.tracks.get(t.id) })) } }),
+          ),
+          format,
+        );
+      }
+
+      // Backs the web UI's "Shuffle" buttons on the library/artist/folder
+      // views: a uniformly random sample (unlike getRandomSongs, no
+      // favorites/recent blending) of everything in that scope — the whole
+      // library, one artist (artistId), or a folder including its subfolders
+      // (path) — capped like the other list endpoints.
+      case "getShuffleSongs": {
+        const size = Math.min(Number(params.get("size") ?? 500), 500);
+        const artistId = params.get("artistId");
+        const path = params.get("path");
+        const [tracks, starred] = await Promise.all([
+          artistId
+            ? q.getRandomTracksByArtist(env.DB, artistId, size)
+            : path !== null
+              ? q.getRandomTracksUnderPath(env.DB, path, size)
+              : q.getRandomSongs(env.DB, { size }),
+          q.getStarredIds(env.DB, auth.username),
+        ]);
+        return respond(
+          subsonicSuccess(
+            node("shuffleSongs", undefined, {
+              lists: { song: tracks.map((t) => songNode(t, { starredAt: starred.tracks.get(t.id) })) },
+            }),
           ),
           format,
         );

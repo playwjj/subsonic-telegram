@@ -4,6 +4,7 @@ import {
   getLibraryStats,
   getAlbumList2,
   getRandomSongs,
+  getShuffleSongs,
   getRecentlyPlayed,
   getMostPlayed,
   coverArtUrl,
@@ -13,6 +14,7 @@ import {
 } from "../api/subsonic";
 import { playQueue } from "../stores/player";
 import TrackRow from "../components/TrackRow.vue";
+import ShuffleButton from "../components/ShuffleButton.vue";
 
 const stats = ref<LibraryStats | null>(null);
 const recentAlbums = ref<Album[]>([]);
@@ -98,7 +100,12 @@ onMounted(async () => {
     <section v-if="randomSongs.length">
       <div class="mb-3 flex items-center justify-between">
         <h2 class="text-sm font-medium text-[var(--text-dim)]">Random Songs</h2>
-        <button class="text-xs" :disabled="shuffling" @click="shuffle">🔀 {{ shuffling ? "Shuffling…" : "Shuffle" }}</button>
+        <div class="flex gap-2">
+          <button class="text-xs" :disabled="shuffling" title="Show a different set of random songs" @click="shuffle">
+            ↻ {{ shuffling ? "Loading…" : "New picks" }}
+          </button>
+          <ShuffleButton class="text-xs" label="Shuffle library" :load="() => getShuffleSongs()" />
+        </div>
       </div>
       <div class="glass p-2">
         <TrackRow v-for="(song, i) in randomSongs" :key="song.id" :song="song" @play="playQueue(randomSongs, i)" />

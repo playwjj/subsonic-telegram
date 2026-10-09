@@ -9,6 +9,11 @@
 //
 // Usage:
 //   npm run fix-covers -- [--limit=N] [--album-id=ID] [--force] [--dry-run] [--retry-failed] [--loose-fallback] [--fallback-cover]
+//   npm run fix-covers -- --artist-photos [--limit=N] [--dry-run] [--retry-failed]
+//
+// --artist-photos is a separate mode: instead of album/track covers, it
+// fills artists.cover_ref (what getCoverArt/getArtistInfo2 serve for an
+// artist id) with a Deezer photo for every artist that doesn't have one.
 //
 // Tries an album-level match first (artist + album name). A lot of this
 // library's "albums" are actually a single artist's unrelated singles
@@ -59,6 +64,7 @@ const DRY_RUN = process.argv.includes("--dry-run");
 const RETRY_FAILED = process.argv.includes("--retry-failed");
 const LOOSE_FALLBACK = process.argv.includes("--loose-fallback");
 const FALLBACK_COVER = process.argv.includes("--fallback-cover");
+const ARTIST_PHOTOS = process.argv.includes("--artist-photos");
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -112,7 +118,8 @@ const ITUNES_RATE_LIMIT_BACKOFF_MS = 8000;
 
 type Album = { id: string; name: string; artist_name: string; cover_ref: string | null; sample_source_path: string | null };
 type Track = { id: string; title: string; cover_ref: string | null; source_path: string | null };
-// Keys are "album:<id>" (completed album-level fix), "album-search:<id>"
+// Keys are "album:<id>" (completed album-level fix), "artist-photo:<id>"
+// (an --artist-photos attempt), "album-search:<id>"
 // (cached album-name lookup result),
 // "track:<id>" (a track-level fix attempt), or "local-autogen:<id>" (cached
 // verdict from checking the local source file's embedded picture).
@@ -140,12 +147,26 @@ async function saveState(state: State): Promise<void> {
 // artist name -> Telegram ref of that artist's uploaded photo.
 type ArtistPhotoRefs = Record<string, string>;
 
+// Merges the local cache with artists.cover_ref in D1, so a remote run (no
+// local file, e.g. GitHub Actions) still reuses photos uploaded before.
 async function loadArtistPhotoRefs(): Promise<ArtistPhotoRefs> {
+  let refs: ArtistPhotoRefs = {};
   try {
-    return JSON.parse(await readFile(ARTIST_PHOTO_REF_FILE, "utf-8"));
+    refs = JSON.parse(await readFile(ARTIST_PHOTO_REF_FILE, "utf-8"));
   } catch {
-    return {};
+    // no local cache yet
   }
+  const rows = await d1<{ name: string; cover_ref: string }>(`SELECT name, cover_ref FROM artists WHERE cover_ref IS NOT NULL`);
+  for (const row of rows) refs[normalize(row.name)] ??= row.cover_ref;
+  return refs;
+}
+
+// Records an artist photo both in the local cache and on the artist row
+// itself — the latter is what the Worker actually serves for artist ids.
+async function rememberArtistPhoto(refs: ArtistPhotoRefs, artistName: string, ref: string): Promise<void> {
+  refs[normalize(artistName)] = ref;
+  await saveArtistPhotoRefs(refs);
+  await d1(`UPDATE artists SET cover_ref = ? WHERE name = ? AND cover_ref IS NULL`, [ref, artistName]);
 }
 
 async function saveArtistPhotoRefs(refs: ArtistPhotoRefs): Promise<void> {
@@ -640,10 +661,7 @@ async function fixTracks(artistName: string, tracks: Track[], state: State, phot
       const ref = await uploadArtwork(url, track.id, track.cover_ref);
       // A freshly-uploaded artist photo (as opposed to a one-off song
       // cover) gets cached so the next track by this artist reuses it.
-      if (loose?.kind === "new-photo") {
-        photoRefs[normalize(loose.artist)] = ref;
-        await saveArtistPhotoRefs(photoRefs);
-      }
+      if (loose?.kind === "new-photo") await rememberArtistPhoto(photoRefs, loose.artist, ref);
       console.log(`    updated track cover_ref (${status})`);
       state[`track:${track.id}`] = status;
       fixedCount++;
@@ -656,6 +674,66 @@ async function fixTracks(artistName: string, tracks: Track[], state: State, phot
   return fixedCount;
 }
 
+async function fixArtistPhotos(state: State, photoRefs: ArtistPhotoRefs): Promise<void> {
+  const artists = await d1<{ id: string; name: string }>(
+    `SELECT id, name FROM artists WHERE cover_ref IS NULL ORDER BY sort_name COLLATE NOCASE`,
+  );
+  console.log(`${artists.length} artist(s) without a photo (limit ${LIMIT} this run, dry-run=${DRY_RUN}).`);
+
+  let fixed = 0;
+  let reused = 0;
+  let noMatch = 0;
+  let errored = 0;
+  let visited = 0;
+
+  for (const artist of artists) {
+    if (visited >= LIMIT) break;
+    const key = `artist-photo:${artist.id}`;
+    if (state[key] === "no-match" || state[key] === "error") continue;
+    visited++;
+    console.log(artist.name);
+
+    try {
+      // Same artist name already has a photo uploaded (by an earlier
+      // --loose-fallback run) -- just point the row at it.
+      const cached = photoRefs[normalize(artist.name)];
+      if (cached) {
+        console.log("  reusing already-uploaded photo");
+        if (!DRY_RUN) await d1(`UPDATE artists SET cover_ref = ? WHERE id = ?`, [cached, artist.id]);
+        state[key] = "fixed";
+        reused++;
+      } else {
+        const url = await searchArtistPhoto(artist.name);
+        if (!url) {
+          console.log("  no photo found");
+          state[key] = "no-match";
+          noMatch++;
+        } else if (DRY_RUN) {
+          console.log(`  found: ${url}`);
+          fixed++;
+        } else {
+          const ref = await uploadArtwork(url, `artist-${artist.id}`, null);
+          await d1(`UPDATE artists SET cover_ref = ? WHERE id = ?`, [ref, artist.id]);
+          photoRefs[normalize(artist.name)] = ref;
+          await saveArtistPhotoRefs(photoRefs);
+          console.log("  updated artist cover_ref");
+          state[key] = "fixed";
+          fixed++;
+        }
+      }
+    } catch (err) {
+      console.error(`  failed: ${err}`);
+      state[key] = "error";
+      errored++;
+    }
+    if (!DRY_RUN) await saveState(state);
+  }
+
+  console.log(
+    `\nDone. Photos uploaded: ${fixed}, reused: ${reused}, no match: ${noMatch}, errored: ${errored} (out of ${visited} visited this run).`,
+  );
+}
+
 async function main() {
   const state = await loadState();
   const photoRefs = await loadArtistPhotoRefs();
@@ -663,6 +741,11 @@ async function main() {
     for (const key of Object.keys(state)) {
       if (state[key] === "no-match" || state[key] === "error") delete state[key];
     }
+  }
+
+  if (ARTIST_PHOTOS) {
+    await fixArtistPhotos(state, photoRefs);
+    return;
   }
 
   const albums = await fetchAlbums();

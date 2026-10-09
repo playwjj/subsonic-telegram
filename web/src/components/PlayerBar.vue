@@ -132,9 +132,9 @@ function formatTime(sec: number): string {
     >
       {{ starred ? "♥" : "♡" }}
     </button>
-    <StarRating :song="currentTrack" />
-    <button class="heart-btn" title="Lyrics" @click="openLyrics">🎤</button>
-    <button class="heart-btn" title="Queue" @click="openQueue">☰</button>
+    <StarRating class="rating-slot" :song="currentTrack" />
+    <button class="heart-btn extra" title="Lyrics" @click="openLyrics">🎤</button>
+    <button class="heart-btn extra" title="Queue" @click="openQueue">☰</button>
     <div class="controls">
       <button
         class="mode-btn"
@@ -156,16 +156,18 @@ function formatTime(sec: number): string {
         {{ playerState.repeat === "one" ? "🔂" : "🔁" }}
       </button>
     </div>
-    <span class="time">{{ formatTime(playerState.currentTime) }}</span>
-    <input
-      class="seek"
-      type="range"
-      min="0"
-      :max="playerState.duration || 0"
-      :value="playerState.currentTime"
-      @input="onSeek"
-    />
-    <span class="time">{{ formatTime(playerState.duration) }}</span>
+    <div class="progress">
+      <span class="time">{{ formatTime(playerState.currentTime) }}</span>
+      <input
+        class="seek"
+        type="range"
+        min="0"
+        :max="playerState.duration || 0"
+        :value="playerState.currentTime"
+        @input="onSeek"
+      />
+      <span class="time">{{ formatTime(playerState.duration) }}</span>
+    </div>
     <div class="volume">
       <button class="heart-btn" :title="playerState.volume > 0 ? 'Mute' : 'Unmute'" @click="toggleMute">
         {{ playerState.volume === 0 ? "🔇" : playerState.volume < 0.5 ? "🔉" : "🔊" }}
@@ -305,6 +307,13 @@ function formatTime(sec: number): string {
 .volume input {
   width: 5rem;
 }
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+  min-width: 0;
+}
 .seek {
   flex: 1;
   min-width: 3rem;
@@ -316,14 +325,44 @@ function formatTime(sec: number): string {
   flex-shrink: 0;
 }
 
+/* Phones: one row can't fit everything (it used to push the playback
+   controls off the right edge), so wrap into two — cover/title/♥/controls
+   on top, progress bar + lyrics/queue below. The progress row's 60% basis
+   is what forces the wrap; it then grows to fill the second line. */
 @media (max-width: 600px) {
-  /* Phones use hardware volume buttons; the slider just eats seek-bar room. */
-  .volume {
-    display: none;
+  .player-bar {
+    flex-wrap: wrap;
+    gap: 0.4rem 0.5rem;
+    padding: 0.5rem 0.75rem;
   }
   .meta {
+    flex: 1 1 0;
     min-width: 0;
-    max-width: 6rem;
+    max-width: none;
+  }
+  .controls {
+    gap: 0;
+  }
+  .controls button {
+    width: 1.9rem;
+    padding: 0.25rem 0;
+  }
+  .cover {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+  .progress {
+    order: 1;
+    flex: 1 1 60%;
+    gap: 0.5rem;
+  }
+  .extra {
+    order: 2;
+  }
+  /* Rating stays available on every track row; phones use hardware volume. */
+  .rating-slot,
+  .volume {
+    display: none;
   }
 }
 

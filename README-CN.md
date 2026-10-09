@@ -87,7 +87,7 @@ npm run db:migrate:remote
 
 ## 已实现的端点
 
-`ping` `getLicense` `getMusicFolders` `getIndexes` `getArtists` `getArtist` `getAlbum` `getSong` `getAlbumList2` `getGenres` `search3` `stream` `download` `getCoverArt` `getPlaylists` `getPlaylist` `createPlaylist` `updatePlaylist` `deletePlaylist` `getRandomSongs` `scrobble` `star` `unstar` `getStarred` `getStarred2` `setRating` `getLyrics` `getOpenSubsonicExtensions` `getLyricsBySongId` `getPlayQueue` `savePlayQueue` `getTopSongs` `getSimilarSongs2`
+`ping` `getLicense` `getMusicFolders` `getIndexes` `getArtists` `getArtist` `getAlbum` `getSong` `getAlbumList2` `getGenres` `search3` `stream` `download` `getCoverArt` `getPlaylists` `getPlaylist` `createPlaylist` `updatePlaylist` `deletePlaylist` `getRandomSongs` `scrobble` `star` `unstar` `getStarred` `getStarred2` `setRating` `getLyrics` `getOpenSubsonicExtensions` `getLyricsBySongId` `getPlayQueue` `savePlayQueue` `getArtistInfo` `getArtistInfo2` `getTopSongs` `getSimilarSongs2`
 
 `scrobble`（`submission=true`，默认值）会给对应 track 的 `play_count` 加一、更新 `last_played`；`submission=false`（"正在播放"通知）目前直接忽略，不做处理。`star`/`unstar` 接受 `id`（曲目）/`albumId`/`artistId` 中的任意组合；`getStarred`/`getStarred2` 返回同一份收藏数据，只是外层标签不同（`starred` vs `starred2`），走的都是这个项目原生的 ID3 结构。`setRating` 给曲目打 1–5 星的 `userRating`（`rating=0` 清除评分）；评分只针对单曲，没有专辑/艺人维度的评分。
 
@@ -100,6 +100,8 @@ npm run db:migrate:remote
 `getPlayQueue`/`savePlayQueue` 在一张小表 `play_queue` 里存一份播放队列（单用户服务器，本来就只有一份，不是每个 session 一份历史记录）：队列里的曲目 id 列表、当前播的是哪首、播放进度（毫秒）。有了这个，客户端就能跨设备/跨会话续播——手机上听着，过会儿在网页版打开还是同一个队列、同一个进度。`savePlayQueue` 接受重复的 `id` 参数表示整个队列，另加 `current`/`position`；如果还没存过，`getPlayQueue` 就只返回一个空的 `<playQueue username="…"/>`，没有任何曲目。
 
 `getTopSongs`/`getSimilarSongs2` 官方实现一般是靠 Last.fm 撑着（艺人简介、真正的"相似艺人"关系图），为了这两个接口专门去接一个外部服务、管一个 API key 不太划算，所以两个都是用 D1 里已有的数据凑出来的近似版本。`getTopSongs` 接的是艺人**名字**（经典版 Subsonic 协议的历史遗留，那会儿还没有 ID3 浏览这套），按 `play_count` 排序返回这个艺人的曲目。`getSimilarSongs2` 没有真正的"相似艺人"关系图可用，就把这个艺人自己的其他曲目（60%，对应 `SIMILAR_SONGS_ARTIST_RATIO`）跟其他艺人里流派跟它最常见流派一致的随机曲目（剩下的部分）混在一起——跟 `getRandomSongs` 混入收藏/最近添加是同一套"混几个相关信号"的思路，只是换了个信号源。
+
+**艺人图片**：每个艺人的 `coverArt` 就是它自己的 id，`getCoverArt` 收到艺人 id 时返回这个艺人的照片（`artists.cover_ref`，由 `npm run fix-covers -- --artist-photos` 填充，见下），没有照片就依次退回到他某张专辑的封面（新的优先）、任意一首歌的单曲封面，最后才是占位图。`getArtistInfo`/`getArtistInfo2` 只返回 `smallImageUrl`/`mediumImageUrl`/`largeImageUrl`（没有简介和相似艺人——真正的服务端这些都来自 Last.fm）；客户端会把这些当普通图片地址直接加载、不会自己补上鉴权参数，所以链接指向 `getCoverArt`，并原样带上调用方自己的鉴权参数。`artists.cover_ref` 加入之前建的数据库需要执行一次 `ALTER TABLE artists ADD COLUMN cover_ref TEXT;`（见 `db/schema.sql`）。
 
 **客户端兼容性备注**：部分 Subsonic 客户端（实测 Amperfy）在真正调用 API 之前会先探测裸的服务器地址 `/`，把非 2xx 响应当成"服务器不存在"，导致登录直接报 404。现在 `/`（连同其它非 `/rest/*` 路径）由 Web UI 的静态资源应答，天然是 `200`，这个兼容问题顺带解决了，见下面 [Web UI](#web-ui)。
 
@@ -217,6 +219,14 @@ npm run import-m3u -- /path/to/playlist.m3u
 
 原理是拿 `.m3u` 里列的每个文件路径，换算成相对 `LOCAL_MUSIC_DIR`（或 `--music-dir=` 指定的目录）的路径，去 D1 按 `source_path` 精确匹配已导入的 track——**所以 `.m3u` 里引用的歌必须先用 `npm run import` 导入过**，没导入的会在结尾列出来，提示去先导入。重跑同一个 `.m3u` 文件会更新同名 playlist（按名字算出固定 id），不会重复建。
 
+### 艺人照片
+
+```bash
+npm run fix-covers -- --artist-photos [--limit=N] [--dry-run] [--retry-failed]
+```
+
+给还没有照片的艺人从 Deezer（免费、不用 key）找一张照片填进 `artists.cover_ref`，跟其它封面一样上传到 Telegram。之前 `--loose-fallback` 已经上传过的艺人照片（`.artist-photo-refs.json`）会直接复用，不会再查 Deezer；`--loose-fallback` 以后找到新的艺人照片时也会同时写进 `artists.cover_ref`。Deezer 上没有照片的艺人会在 `.cover-fix-state.json` 里记成 `no-match`，下次跳过（`--retry-failed` 会清掉这些记录）。
+
 ### 自动修复封面
 
 `.github/workflows/fix-covers.yml` 会每天 UTC 时间 02:00 运行，也可以在 GitHub Actions 页面手动触发。它调用独立的 `fix-covers:remote` 脚本，只检查最近 48 小时创建的专辑/歌曲的 D1 `cover_ref`，不会读取本地音乐目录或 `.cover-fix-state.json`；每次都以 D1 为准。
@@ -229,7 +239,7 @@ npm run import-m3u -- /path/to/playlist.m3u
 
 **页面**：Home（库统计 + 最近新增/最近播放/最多播放）、Artists（按 ID3 艺人/专辑浏览）、Songs（扁平化全曲目列表，支持排序分页）、Folders（按导入时的本地文件夹结构浏览，见下）、Favorites（通过 `getStarred2` 列出收藏的歌曲/专辑/艺人，可全部播放或随机播放）、Search、Playlists。
 
-**播放器**：支持随机播放（播放条上的 🔀，或者专辑/歌单页的「🔀 Shuffle」——从随机一首开始；关掉随机会恢复原顺序）、循环（关/列表/单曲）和音量调节（随机/循环/音量设置存在 `localStorage`）。播放队列会通过 `savePlayQueue` 同步到服务端，打开页面时用 `getPlayQueue` 恢复到上次的歌和进度（暂停状态），刷新页面或者从别的 Subsonic 客户端过来都能续播；因为所有 id 都要拼进 URL 查询参数，只保存当前曲目前后共 200 首的窗口。锁屏/通知栏控制和键盘媒体键走的是 Media Session API。播放条上的 ☰ 打开播放队列（点任意一首跳过去播、移除单首或清空队列）；每一行歌曲的 ⋯ 菜单里有「Play next」（下一首播放）和「Add to queue」（加到队列末尾）。
+**播放器**：支持随机播放（播放条上的 🔀 是对当前队列的开关；各处的「🔀 Shuffle」按钮则直接打乱一组歌开始播——专辑、歌单（详情页和歌单列表的每一行）、艺人、文件夹（含子文件夹）、收藏、Songs 页（「Shuffle all」，整个曲库），以及首页 Random Songs 旁边的「Shuffle library」。艺人/文件夹/整个曲库这几个通过本项目自己的 `getShuffleSongs` 接口均匀随机抽最多 500 首；关掉随机会恢复原顺序）、循环（关/列表/单曲）和音量调节（随机/循环/音量设置存在 `localStorage`）。播放队列会通过 `savePlayQueue` 同步到服务端，打开页面时用 `getPlayQueue` 恢复到上次的歌和进度（暂停状态），刷新页面或者从别的 Subsonic 客户端过来都能续播；因为所有 id 都要拼进 URL 查询参数，只保存当前曲目前后共 200 首的窗口。手机上（≤600px）播放条会分成两行——封面/歌名/播放控制一行，进度条和歌词/队列按钮一行——并隐藏星级评分和音量条。锁屏/通知栏控制和键盘媒体键走的是 Media Session API。播放条上的 ☰ 打开播放队列（点任意一首跳过去播、移除单首或清空队列）；每一行歌曲的 ⋯ 菜单里有「Play next」（下一首播放）和「Add to queue」（加到队列末尾）。
 
 **Folders 是什么**：按 `source_path`（`npm run import` 记录的、相对导入根目录的路径）还原出原始文件夹树，跟 Artists 那种按 ID3 标签分组的浏览方式并列存在。对那些"合集"文件夹（比如按月份存的热歌榜）特别有用——这类文件夹里每首歌的 ID3 艺人标签都不一样，按 Artists 浏览会被打散到几十上百个艺人名下，按 Folders 浏览则完全保留原来"一个文件夹一份合集"的样子。对应的后端接口是 `getFolder`（`src/index.ts`），跟 `getLibraryStats`/`getSongs`/`getRecentlyPlayed`/`getMostPlayed` 一样，都不是 Subsonic 官方协议的一部分，只服务于这个项目自己的 Web UI。
 

@@ -244,6 +244,14 @@ export async function getRandomSongs(size: number): Promise<Song[]> {
   return body.randomSongs.song;
 }
 
+// Uniformly random sample (up to 500) of the whole library, one artist, or a
+// folder including its subfolders — this project's own endpoint, for the
+// web UI's "Shuffle" buttons.
+export async function getShuffleSongs(scope: { artistId?: string; path?: string } = {}): Promise<Song[]> {
+  const body = await call<{ shuffleSongs: { song?: Song[] } }>("getShuffleSongs", scope);
+  return body.shuffleSongs.song ?? [];
+}
+
 export async function getRecentlyPlayed(size: number): Promise<Song[]> {
   const body = await call<{ recentlyPlayed: { song: Song[] } }>("getRecentlyPlayed", { size });
   return body.recentlyPlayed.song;

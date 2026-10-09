@@ -10,9 +10,11 @@ import {
   SubsonicError,
   type FolderDir,
   type Song,
+  getShuffleSongs,
 } from "../api/subsonic";
 import { playQueue } from "../stores/player";
 import TrackRow from "../components/TrackRow.vue";
+import ShuffleButton from "../components/ShuffleButton.vue";
 import Modal from "../components/Modal.vue";
 import UploadForm from "../components/UploadForm.vue";
 
@@ -185,6 +187,11 @@ function handleUploaded() {
       >
         ⬆ Upload here
       </button>
+      <ShuffleButton
+        v-if="!loading && (dirs.length || songs.length)"
+        title="Shuffle everything in this folder, including subfolders"
+        :load="() => getShuffleSongs({ path: currentPath })"
+      />
       <button v-if="!creatingFolder" @click="startCreateFolder">+ New folder</button>
       <input
         v-else

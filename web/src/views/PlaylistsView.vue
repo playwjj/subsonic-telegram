@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { getPlaylists, createPlaylist, type Playlist } from "../api/subsonic";
+import { getPlaylists, getPlaylist, createPlaylist, type Playlist } from "../api/subsonic";
+import ShuffleButton from "../components/ShuffleButton.vue";
 
 const playlists = ref<Playlist[]>([]);
 const newName = ref("");
@@ -34,7 +35,10 @@ async function create() {
     <ul v-else class="glass p-2">
       <li v-for="p in playlists" :key="p.id">
         <RouterLink :to="{ name: 'playlist', params: { id: p.id } }">{{ p.name }}</RouterLink>
-        <span class="count">{{ p.songCount }} 首</span>
+        <span class="right">
+          <span class="count">{{ p.songCount }} 首</span>
+          <ShuffleButton v-if="p.songCount" class="text-xs" :load="async () => (await getPlaylist(p.id)).entry" />
+        </span>
       </li>
     </ul>
   </div>
@@ -61,6 +65,14 @@ li {
 }
 li + li {
   border-top: 1px solid var(--border);
+}
+li {
+  align-items: center;
+}
+.right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 }
 .count {
   opacity: 0.6;

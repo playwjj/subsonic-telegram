@@ -3,8 +3,11 @@
 CREATE TABLE IF NOT EXISTS artists (
   id        TEXT PRIMARY KEY,
   name      TEXT NOT NULL,
-  sort_name TEXT NOT NULL
+  sort_name TEXT NOT NULL,
+  cover_ref TEXT              -- JSON: telegram file ref for an artist photo (scripts/fix-covers.ts), or NULL
 );
+-- Existing databases created before cover_ref existed need, once:
+--   ALTER TABLE artists ADD COLUMN cover_ref TEXT;
 CREATE INDEX IF NOT EXISTS idx_artists_sort_name ON artists(sort_name);
 
 CREATE TABLE IF NOT EXISTS albums (

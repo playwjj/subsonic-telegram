@@ -4,6 +4,7 @@ export interface ArtistRow {
   id: string;
   name: string;
   sort_name: string;
+  cover_ref: string | null;
   album_count: number;
 }
 
@@ -46,7 +47,7 @@ export interface TrackRow {
 }
 
 const ARTIST_SELECT = `
-  SELECT a.id, a.name, a.sort_name, COUNT(al.id) as album_count
+  SELECT a.id, a.name, a.sort_name, a.cover_ref, COUNT(al.id) as album_count
   FROM artists a LEFT JOIN albums al ON al.artist_id = a.id
 `;
 
@@ -91,6 +92,25 @@ export async function listAlbumsByArtist(db: D1Database, artistId: string): Prom
 export async function getAlbum(db: D1Database, id: string): Promise<AlbumRow | null> {
   const row = await db.prepare(`${ALBUM_SELECT} WHERE al.id = ? GROUP BY al.id`).bind(id).first<AlbumRow>();
   return row ?? null;
+}
+
+// An artist's own photo if fix-covers found one, otherwise borrows the
+// cover of one of their albums (newest first), then any per-track cover —
+// so artists still get a real picture, just not a portrait.
+export async function getArtistCoverRef(db: D1Database, artistId: string): Promise<string | null> {
+  const row = await db
+    .prepare(
+      `SELECT COALESCE(
+         ar.cover_ref,
+         (SELECT cover_ref FROM albums WHERE artist_id = ar.id AND cover_ref IS NOT NULL
+          ORDER BY year DESC, created_at DESC LIMIT 1),
+         (SELECT cover_ref FROM tracks WHERE artist_id = ar.id AND cover_ref IS NOT NULL LIMIT 1)
+       ) as cover_ref
+       FROM artists ar WHERE ar.id = ?`,
+    )
+    .bind(artistId)
+    .first<{ cover_ref: string | null }>();
+  return row?.cover_ref ?? null;
 }
 
 export async function listTracksByAlbum(db: D1Database, albumId: string): Promise<TrackRow[]> {
@@ -632,6 +652,15 @@ export async function savePlayQueue(
     )
     .bind(owner, JSON.stringify(opts.trackIds), opts.currentId, opts.positionMs, Math.floor(Date.now() / 1000), opts.changedBy)
     .run();
+}
+
+export async function getRandomTracksUnderPath(db: D1Database, prefix: string, limit: number): Promise<TrackRow[]> {
+  const pattern = prefix ? `${prefix}/%` : "%";
+  const { results } = await db
+    .prepare(`${TRACK_SELECT} WHERE t.source_path LIKE ? ORDER BY RANDOM() LIMIT ?`)
+    .bind(pattern, limit)
+    .all<TrackRow>();
+  return results;
 }
 
 export async function listTracksUnderPath(db: D1Database, prefix: string): Promise<TrackRow[]> {

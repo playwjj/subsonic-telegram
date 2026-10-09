@@ -49,7 +49,7 @@ async function handleLogout() {
       </button>
     </nav>
 
-    <main class="mx-auto max-w-5xl px-4 py-5" :class="{ 'pb-24': isLoggedIn() }">
+    <main class="mx-auto max-w-5xl px-4 py-5" :class="{ 'pb-24 max-[600px]:pb-32': isLoggedIn() }">
       <RouterView />
     </main>
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import { getArtist, coverArtUrl, type ArtistDetail } from "../api/subsonic";
+import { getArtist, getShuffleSongs, coverArtUrl, type ArtistDetail } from "../api/subsonic";
+import ShuffleButton from "../components/ShuffleButton.vue";
 
 const props = defineProps<{ id: string }>();
 const artist = ref<ArtistDetail | null>(null);
@@ -23,6 +24,7 @@ watch(() => props.id, load, { immediate: true });
     <div class="artist-header">
       <img v-if="artist.coverArt" :src="coverArtUrl(artist.coverArt)" :alt="`${artist.name} cover`" />
       <h1>{{ artist.name }}</h1>
+      <ShuffleButton class="ml-auto" :load="() => getShuffleSongs({ artistId: artist!.id })" />
     </div>
     <div class="albums">
       <RouterLink
