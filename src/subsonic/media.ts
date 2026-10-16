@@ -1,5 +1,6 @@
 import * as q from "../db/queries";
 import type { StorageBackend } from "../storage/types";
+import { cacheKey } from "../storage/cached";
 
 export async function streamTrack(
   db: D1Database,
@@ -25,13 +26,33 @@ export async function streamTrack(
   return withName;
 }
 
+// Covers rarely change, and every fetch of one means a round trip to
+// Telegram (or R2): let clients keep them a day, then keep showing the old
+// copy while they revalidate in the background for up to a month — a
+// revalidation of an unchanged cover is a 304 off one D1 lookup, using the
+// cover's file ref as the ETag. "private": the URL carries the user's auth.
+const COVER_CACHE = "private, max-age=86400, stale-while-revalidate=2592000";
+// The placeholder (no cover yet, or Telegram failing) only briefly, so a
+// cover added meanwhile shows up soon.
+const PLACEHOLDER_CACHE = "private, max-age=300";
+
+function withHeaders(response: Response, headers: Record<string, string>): Response {
+  const out = new Response(response.body, response);
+  for (const [k, v] of Object.entries(headers)) out.headers.set(k, v);
+  return out;
+}
+
 export async function getCoverArt(
   db: D1Database,
   storage: StorageBackend,
   assets: Fetcher,
   id: string,
+  ifNoneMatch: string | null,
 ): Promise<Response> {
-  const placeholder = () => assets.fetch(new Request("https://subsonic-telegram.invalid/music-cover.jpg"));
+  const placeholder = async () =>
+    withHeaders(await assets.fetch(new Request("https://subsonic-telegram.invalid/music-cover.jpg")), {
+      "Cache-Control": PLACEHOLDER_CACHE,
+    });
   const album = await q.getAlbum(db, id);
   // Album, track and artist ids are md5s of different natural keys, so one
   // id never matches more than one of these.
@@ -39,6 +60,11 @@ export async function getCoverArt(
     album?.cover_ref ?? (await q.getTrack(db, id))?.cover_ref ?? (album ? null : await q.getArtistCoverRef(db, id));
   if (!coverRef) return placeholder();
 
+  const etag = `"${(await cacheKey(coverRef)).slice(0, 24)}"`;
+  if (ifNoneMatch && ifNoneMatch.split(",").some((tag) => tag.trim().replace(/^W\//, "") === etag)) {
+    return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": COVER_CACHE } });
+  }
   const response = await storage.getFileResponse(coverRef, null);
-  return response.ok ? response : placeholder();
+  if (!response.ok) return placeholder();
+  return withHeaders(response, { ETag: etag, "Cache-Control": COVER_CACHE });
 }

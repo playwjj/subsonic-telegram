@@ -2,7 +2,7 @@
 // credentials stored by stores/auth.ts as query params — same model any
 // Subsonic client uses, just from a browser instead of a native app.
 import { reactive } from "vue";
-import { getCredentials, setCredentials } from "../stores/auth";
+import { credentialsFor, getCredentials, setCredentials, type Credentials } from "../stores/auth";
 
 const CLIENT_NAME = "subsonic-telegram-web";
 const API_VERSION = "1.16.1";
@@ -18,10 +18,11 @@ export class SubsonicError extends Error {
 type ParamValue = string | number | undefined;
 type Params = Record<string, ParamValue | ParamValue[]>;
 
-function buildSearch(params: Params, creds: { username: string; password: string }): URLSearchParams {
+function buildSearch(params: Params, creds: Credentials): URLSearchParams {
   const search = new URLSearchParams();
   search.set("u", creds.username);
-  search.set("p", creds.password);
+  search.set("t", creds.token);
+  search.set("s", creds.salt);
   search.set("v", API_VERSION);
   search.set("c", CLIENT_NAME);
   search.set("f", "json");
@@ -36,7 +37,7 @@ function buildSearch(params: Params, creds: { username: string; password: string
   return search;
 }
 
-function buildUrl(endpoint: string, params: Params = {}, creds?: { username: string; password: string }): string {
+function buildUrl(endpoint: string, params: Params = {}, creds?: Credentials): string {
   const search = buildSearch(params, creds ?? getCredentials());
   return `/rest/${endpoint}.view?${search.toString()}`;
 }
@@ -53,7 +54,7 @@ async function parseResponse<T>(res: Response): Promise<T> {
 async function call<T>(
   endpoint: string,
   params?: Params,
-  creds?: { username: string; password: string },
+  creds?: Credentials,
 ): Promise<T> {
   return parseResponse<T>(await fetch(buildUrl(endpoint, params, creds)));
 }
@@ -88,8 +89,9 @@ export function coverArtUrl(id: string): string {
 }
 
 export async function login(username: string, password: string): Promise<void> {
-  await call("ping", {}, { username, password });
-  setCredentials({ username, password });
+  const creds = credentialsFor(username, password);
+  await call("ping", {}, creds);
+  setCredentials(creds);
 }
 
 // --- entity shapes, matching src/subsonic/mappers.ts on the Worker side ---

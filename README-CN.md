@@ -105,6 +105,8 @@ npm run db:migrate:remote
 
 **艺人图片**：每个艺人的 `coverArt` 就是它自己的 id，`getCoverArt` 收到艺人 id 时返回这个艺人的照片（`artists.cover_ref`，由 `npm run fix-covers -- --artist-photos` 填充，见下），没有照片就依次退回到他某张专辑的封面（新的优先）、任意一首歌的单曲封面，最后才是占位图。`getArtistInfo`/`getArtistInfo2` 只返回 `smallImageUrl`/`mediumImageUrl`/`largeImageUrl`（没有简介和相似艺人——真正的服务端这些都来自 Last.fm）；客户端会把这些当普通图片地址直接加载、不会自己补上鉴权参数，所以链接指向 `getCoverArt`，并原样带上调用方自己的鉴权参数。`artists.cover_ref` 加入之前建的数据库需要执行一次 `ALTER TABLE artists ADD COLUMN cover_ref TEXT;`（见 `db/schema.sql`）。
 
+**封面缓存**：`getCoverArt` 的响应带 `Cache-Control: private, max-age=86400, stale-while-revalidate=2592000`，以及根据封面文件引用算出来的 `ETag`。客户端一天内直接用缓存，之后在后台重新验证——封面没变的话只花一次 D1 查询、返回 304，不用再去 Telegram 取。占位图只缓存 5 分钟，这样新加的封面很快就能显示出来。`size` 参数会被忽略（封面按原样返回）。
+
 **客户端兼容性备注**：部分 Subsonic 客户端（实测 Amperfy）在真正调用 API 之前会先探测裸的服务器地址 `/`，把非 2xx 响应当成"服务器不存在"，导致登录直接报 404。现在 `/`（连同其它非 `/rest/*` 路径）由 Web UI 的静态资源应答，天然是 `200`，这个兼容问题顺带解决了，见下面 [Web UI](#web-ui)。
 
 ## 用 Subsonic 客户端连接
@@ -304,7 +306,7 @@ not_found_handling = "single-page-application"
 
 `run_worker_first` 只对 `/rest/*` 生效，意味着别的路径（`/`、`/playlists/xxx` 等）**根本不会进 `src/index.ts`**，直接由 Cloudflare 从 `web/dist` 静态返回（`not_found_handling = "single-page-application"` 让 Vue Router 的客户端路由刷新/直接访问也能命中 `index.html`）。这也是为什么之前给 Amperfy 打的那个"根路径特判"补丁被删掉了——现在 `/` 天然由真实的 `index.html` 应答。
 
-**鉴权模型**：登录界面收集用户名密码，跟其它 Subsonic 客户端一样存在浏览器本地（`localStorage`），之后每个 API/`stream`/`getCoverArt` 请求都带上——这意味着密码会出现在这些请求的 URL 查询参数里（浏览器历史、Performance API 等能看到），是 Subsonic 协议这套经典鉴权方式本身的特性，不是这个 Web UI 独有的新增风险，个人单用户部署下可接受。
+**鉴权模型**：登录时把密码换算成 Subsonic token（`t = md5(密码 + salt)`，每次登录随机生成 salt），`localStorage` 里只存用户名、token 和 salt，不存密码。之后每个 API/`stream`/`getCoverArt` 请求带的是 `t`/`s` 而不是 `p`，所以留在浏览器历史或日志里的 URL 不会泄露密码。不过泄露出去的 URL 在改密码之前仍然可以被拿去调用接口（Subsonic 协议的 token 没有过期机制），这一点跟所有 Subsonic 客户端一样；退出再登录只会换 salt，解决不了这个问题。旧版本保存的登录信息（里面存的是密码）会在下次打开页面时自动转换。第三方客户端不受影响：服务端仍然同时接受 `t`/`s` 和 `p`。
 
 **本地开发**：
 
