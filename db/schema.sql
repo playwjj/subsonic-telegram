@@ -9,6 +9,9 @@ CREATE TABLE IF NOT EXISTS artists (
 -- Existing databases created before cover_ref existed need, once:
 --   ALTER TABLE artists ADD COLUMN cover_ref TEXT;
 CREATE INDEX IF NOT EXISTS idx_artists_sort_name ON artists(sort_name);
+-- Album and song lists sorted by artist walk artists in this order (see
+-- listAlbumList2 / listAllTracks in src/db/queries.ts).
+CREATE INDEX IF NOT EXISTS idx_artists_name_nocase ON artists(name COLLATE NOCASE);
 
 CREATE TABLE IF NOT EXISTS albums (
   id         TEXT PRIMARY KEY,
@@ -20,6 +23,11 @@ CREATE TABLE IF NOT EXISTS albums (
   created_at INTEGER NOT NULL  -- unix seconds, used for "recently added"
 );
 CREATE INDEX IF NOT EXISTS idx_albums_artist ON albums(artist_id);
+-- getAlbumList2's orderings. D1 bills every row a query reads, so a list
+-- that sorts the whole table to return 20 albums costs the whole table.
+CREATE INDEX IF NOT EXISTS idx_albums_created ON albums(created_at);
+CREATE INDEX IF NOT EXISTS idx_albums_name_nocase ON albums(name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_albums_year ON albums(year);
 
 CREATE TABLE IF NOT EXISTS tracks (
   id           TEXT PRIMARY KEY,
@@ -62,6 +70,13 @@ CREATE INDEX IF NOT EXISTS idx_tracks_source_path ON tracks(source_path);
 -- Covering index: getFolder/getFolderTree aggregate per-folder counts/sizes
 -- straight from it without touching the table rows.
 CREATE INDEX IF NOT EXISTS idx_tracks_dir ON tracks(dir, size, duration);
+-- The Songs page's sort orders, recently/most played and the Storage page's
+-- largest songs: each reads just the page it shows instead of every track.
+CREATE INDEX IF NOT EXISTS idx_tracks_title_nocase ON tracks(title COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_tracks_created ON tracks(created_at);
+CREATE INDEX IF NOT EXISTS idx_tracks_last_played ON tracks(last_played);
+CREATE INDEX IF NOT EXISTS idx_tracks_play_count ON tracks(play_count);
+CREATE INDEX IF NOT EXISTS idx_tracks_size ON tracks(size);
 
 -- owner is the single AUTH_USERNAME (see wrangler secrets), not a DB-managed
 -- account, so it's a plain string rather than a users(username) FK.
@@ -176,3 +191,5 @@ CREATE TABLE IF NOT EXISTS caption_queue (
   attempts   INTEGER NOT NULL DEFAULT 0,
   last_error TEXT
 );
+-- The cron's next batch, without reading the rest of the queue.
+CREATE INDEX IF NOT EXISTS idx_caption_queue_next ON caption_queue(attempts, queued_at);

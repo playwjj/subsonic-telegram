@@ -84,6 +84,10 @@ function makeStorage(env: Env, ctx: ExecutionContext): StorageBackend {
 // Must match the daily entry in wrangler.toml's [triggers] crons.
 const DAILY_CRON = "17 3 * * *";
 
+// Endpoints that can change how many songs/albums/artists there are: they
+// drop this isolate's cached library totals (see getLibraryStats).
+const LIBRARY_COUNT_CHANGES = new Set(["uploadTrack", "deleteTrack", "deleteItems", "restoreTrash", "updateTracks"]);
+
 function retentionDays(env: Env): number {
   const days = Number(env.TRASH_RETENTION_DAYS);
   return days > 0 ? days : trash.DEFAULT_RETENTION_DAYS;
@@ -138,6 +142,7 @@ export default {
       return respond(subsonicSuccess(node("license", { valid: true })), format);
     }
     const storage = makeStorage(env, ctx);
+    if (LIBRARY_COUNT_CHANGES.has(endpoint)) q.forgetLibraryStats();
 
     try {
       switch (endpoint) {
@@ -1117,11 +1122,14 @@ export default {
   },
 
   // Crons (wrangler.toml [triggers]). Daily: empties trash entries older
-  // than TRASH_RETENTION_DAYS and retries Telegram deletes that failed
-  // earlier. Every few minutes: works off the caption queue.
+  // than TRASH_RETENTION_DAYS, retries Telegram deletes that failed
+  // earlier and drops queued captions of deleted songs. Every few minutes:
+  // works off the caption queue.
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     const storage = makeStorage(env, ctx);
-    if (controller.cron === DAILY_CRON) await trash.dailyCleanup(env.DB, storage, retentionDays(env));
-    else await captions.processCaptionQueue(env.DB, storage);
+    if (controller.cron === DAILY_CRON) {
+      await trash.dailyCleanup(env.DB, storage, retentionDays(env));
+      await captions.pruneCaptionQueue(env.DB);
+    } else await captions.processCaptionQueue(env.DB, storage);
   },
 } satisfies ExportedHandler<Env>;

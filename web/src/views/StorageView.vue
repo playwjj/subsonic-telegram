@@ -29,11 +29,23 @@ async function load() {
 }
 load();
 
-// While captions are being written, keep the count moving.
+// While captions are being written, keep the count moving — just the count:
+// the full stats read the whole library, and D1 bills every row read. Even
+// the count reads the whole queue, so it's slow and skipped while hidden.
 let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 function scheduleRefresh() {
   clearTimeout(refreshTimer);
-  if (stats.value?.captions.queued) refreshTimer = setTimeout(load, 30_000);
+  if (stats.value?.captions.queued) refreshTimer = setTimeout(refreshCaptions, 5 * 60_000);
+}
+async function refreshCaptions() {
+  if (document.hidden || !stats.value) return scheduleRefresh();
+  try {
+    stats.value.captions = await queueCaptions({});
+  } catch {
+    // keep the last count; try again next round
+  }
+  if (stats.value.captions.queued) scheduleRefresh();
+  else load();
 }
 onUnmounted(() => clearTimeout(refreshTimer));
 

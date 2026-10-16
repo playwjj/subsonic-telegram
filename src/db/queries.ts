@@ -127,13 +127,83 @@ export async function getTrack(db: D1Database, id: string): Promise<TrackRow | n
   return row ?? null;
 }
 
-const ALBUM_LIST_ORDER: Record<string, string> = {
-  newest: "al.created_at DESC",
-  alphabeticalByName: "al.name COLLATE NOCASE",
-  alphabeticalByArtist: "ar.name COLLATE NOCASE",
-  random: "RANDOM()",
-  byYear: "al.year",
+function shuffled<T>(items: T[]): T[] {
+  const result = [...items];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+// A uniform random sample of a whole table, without ORDER BY RANDOM(): that
+// reads (and D1 bills) every row to keep a handful. Rowids here are nearly
+// dense — deletes leave only the odd gap — so this draws random rowids in
+// range, `fetch`es the ones that exist and draws again for the rest.
+// Returns null when the table is too small or sparse for that to pay off.
+async function sampleRows<T extends { id: string }>(
+  db: D1Database,
+  table: "tracks" | "albums",
+  size: number,
+  fetch: (rowidsJson: string) => Promise<T[]>,
+  excludeIds: string[] = [],
+): Promise<T[] | null> {
+  // Two subqueries: SQLite only answers MIN or MAX alone straight off the index.
+  const bounds = await db
+    .prepare(`SELECT (SELECT MIN(rowid) FROM ${table}) as lo, (SELECT MAX(rowid) FROM ${table}) as hi`)
+    .first<{ lo: number | null; hi: number | null }>();
+  if (bounds?.lo == null || bounds.hi == null) return [];
+  const span = bounds.hi - bounds.lo + 1;
+  if (size * 4 > span) return null;
+
+  const tried = new Set<number>();
+  const skip = new Set(excludeIds);
+  const picked: T[] = [];
+  for (let round = 0; round < 4 && picked.length < size; round++) {
+    const rowids: number[] = [];
+    while (rowids.length < (size - picked.length) * 1.5 + 5 && tried.size < span) {
+      const r = bounds.lo + Math.floor(Math.random() * span);
+      if (!tried.has(r)) {
+        tried.add(r);
+        rowids.push(r);
+      }
+    }
+    for (const row of shuffled(await fetch(JSON.stringify(rowids)))) {
+      if (picked.length < size && !skip.has(row.id)) picked.push(row);
+    }
+  }
+  return picked.length === size ? shuffled(picked) : null;
+}
+
+// Each order picks the page from albums and artists alone — by index — and
+// only then totals up those albums' tracks: ALBUM_SELECT's GROUP BY would
+// total every album in the library first, and D1 bills each row read.
+// [FROM clause, order picking the page, the same order over the page].
+// CROSS JOIN makes SQLite walk artists by name (idx_artists_name_nocase)
+// rather than sort every album by its artist.
+const ALBUMS_THEN_ARTISTS = "albums al JOIN artists ar ON ar.id = al.artist_id";
+const ALBUM_LIST_ORDER: Record<string, [string, string, string]> = {
+  newest: [ALBUMS_THEN_ARTISTS, "al.created_at DESC", "p.created_at DESC"],
+  alphabeticalByName: [ALBUMS_THEN_ARTISTS, "al.name COLLATE NOCASE", "p.name COLLATE NOCASE"],
+  alphabeticalByArtist: [
+    "artists ar CROSS JOIN albums al ON al.artist_id = ar.id",
+    "ar.name COLLATE NOCASE",
+    "p.artist_name COLLATE NOCASE",
+  ],
+  byYear: [ALBUMS_THEN_ARTISTS, "al.year", "p.year"],
 };
+
+function albumPage(db: D1Database, from: string, where: string, order: string, outerOrder: string) {
+  return db.prepare(
+    `SELECT p.*, COUNT(t.id) as song_count, COALESCE(SUM(t.duration), 0) as duration
+     FROM (
+       SELECT al.id, al.name, al.artist_id, ar.name as artist_name, al.year, al.genre, al.cover_ref, al.created_at
+       FROM ${from} ${where} ${order}
+     ) p
+     LEFT JOIN tracks t ON t.album_id = p.id
+     GROUP BY p.id ${outerOrder}`,
+  );
+}
 
 export async function listAlbumList2(
   db: D1Database,
@@ -141,9 +211,20 @@ export async function listAlbumList2(
   size: number,
   offset: number,
 ): Promise<AlbumRow[]> {
-  const orderBy = ALBUM_LIST_ORDER[type] ?? ALBUM_LIST_ORDER.newest;
-  const { results } = await db
-    .prepare(`${ALBUM_SELECT} GROUP BY al.id ORDER BY ${orderBy} LIMIT ? OFFSET ?`)
+  if (type === "random") {
+    const fetch = async (rowids: string) =>
+      (await albumPage(db, ALBUMS_THEN_ARTISTS, "WHERE al.rowid IN (SELECT value FROM json_each(?))", "", "")
+        .bind(rowids)
+        .all<AlbumRow>()).results;
+    const sample = await sampleRows(db, "albums", size, fetch);
+    if (sample) return sample;
+    const { results } = await albumPage(db, ALBUMS_THEN_ARTISTS, "", "ORDER BY RANDOM() LIMIT ?", "")
+      .bind(size)
+      .all<AlbumRow>();
+    return shuffled(results);
+  }
+  const [from, pageOrder, order] = ALBUM_LIST_ORDER[type] ?? ALBUM_LIST_ORDER.newest;
+  const { results } = await albumPage(db, from, "", `ORDER BY ${pageOrder} LIMIT ? OFFSET ?`, `ORDER BY ${order}`)
     .bind(size, offset)
     .all<AlbumRow>();
   return results;
@@ -350,6 +431,13 @@ function randomSongsFilter(opts: {
 }
 
 export async function getRandomSongs(db: D1Database, opts: RandomSongsOptions): Promise<TrackRow[]> {
+  if (opts.genre === undefined && opts.fromYear === undefined && opts.toYear === undefined) {
+    const fetch = async (rowids: string) =>
+      (await db.prepare(`${TRACK_SELECT} WHERE t.rowid IN (SELECT value FROM json_each(?))`).bind(rowids).all<TrackRow>())
+        .results;
+    const sample = await sampleRows(db, "tracks", opts.size, fetch, opts.excludeIds);
+    if (sample) return sample;
+  }
   const { conditions, params } = randomSongsFilter(opts);
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   params.push(opts.size);
@@ -511,21 +599,35 @@ export interface LibraryStats {
   total_duration: number;
 }
 
-export async function getLibraryStats(db: D1Database): Promise<LibraryStats> {
-  const row = await db
+// Counting reads every row counted, and D1 bills each one, so the totals
+// are kept per isolate for a few minutes: right after an upload or delete
+// they can lag behind by that much.
+const STATS_TTL_MS = 5 * 60_000;
+let statsCache: { at: number; value: Promise<LibraryStats> } | undefined;
+
+export function getLibraryStats(db: D1Database): Promise<LibraryStats> {
+  if (statsCache && Date.now() - statsCache.at < STATS_TTL_MS) return statsCache.value;
+  const value = db
     .prepare(
       `SELECT (SELECT COUNT(*) FROM artists) as artist_count,
               (SELECT COUNT(*) FROM albums) as album_count,
-              (SELECT COUNT(*) FROM tracks) as song_count,
-              (SELECT COALESCE(SUM(duration), 0) FROM tracks) as total_duration`,
+              t.song_count, t.total_duration
+       FROM (SELECT COUNT(*) as song_count, COALESCE(SUM(duration), 0) as total_duration FROM tracks) t`,
     )
-    .first<LibraryStats>();
-  return row!;
+    .first<LibraryStats>()
+    .then((row) => row!);
+  statsCache = { at: Date.now(), value };
+  value.catch(() => (statsCache = undefined));
+  return value;
+}
+
+export function forgetLibraryStats(): void {
+  statsCache = undefined;
 }
 
 const SONG_SORT_COLUMNS: Record<string, string> = {
   title: "t.title COLLATE NOCASE",
-  artist: "t.artist_name COLLATE NOCASE",
+  artist: "ar.name COLLATE NOCASE",
   recent: "t.created_at DESC",
   mostPlayed: "t.play_count DESC",
 };
@@ -540,14 +642,21 @@ export async function listAllTracks(
   opts: { limit: number; offset: number; sort: string },
 ): Promise<ListAllTracksResult> {
   const orderBy = SONG_SORT_COLUMNS[opts.sort] ?? SONG_SORT_COLUMNS.title;
-  const [{ results: tracks }, totalRow] = await Promise.all([
+  // Every order reads just the page off an index; by artist that takes
+  // walking artists by name first (CROSS JOIN keeps SQLite to that order).
+  const select =
+    opts.sort === "artist"
+      ? `SELECT t.*, al.name as album_name, ar.name as artist_name, al.year, al.genre
+         FROM artists ar CROSS JOIN tracks t ON t.artist_id = ar.id JOIN albums al ON al.id = t.album_id`
+      : TRACK_SELECT;
+  const [{ results: tracks }, stats] = await Promise.all([
     db
-      .prepare(`${TRACK_SELECT} ORDER BY ${orderBy} LIMIT ? OFFSET ?`)
+      .prepare(`${select} ORDER BY ${orderBy} LIMIT ? OFFSET ?`)
       .bind(opts.limit, opts.offset)
       .all<TrackRow>(),
-    db.prepare(`SELECT COUNT(*) as total FROM tracks`).first<{ total: number }>(),
+    getLibraryStats(db),
   ]);
-  return { tracks, total: totalRow?.total ?? 0 };
+  return { tracks, total: stats.song_count };
 }
 
 export async function getRecentlyPlayed(db: D1Database, limit: number): Promise<TrackRow[]> {

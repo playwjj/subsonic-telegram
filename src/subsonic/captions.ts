@@ -73,9 +73,14 @@ interface QueuedRow {
   artist_name: string;
 }
 
-export async function processCaptionQueue(db: D1Database, storage: StorageBackend): Promise<void> {
-  // Songs deleted meanwhile have nothing left to caption.
+// Songs deleted after being queued have nothing left to caption. The join
+// below already skips them; this just stops them counting as queued. It
+// reads the whole queue, so it runs from the daily cron, not every batch.
+export async function pruneCaptionQueue(db: D1Database): Promise<void> {
   await db.prepare(`DELETE FROM caption_queue WHERE track_id NOT IN (SELECT id FROM tracks)`).run();
+}
+
+export async function processCaptionQueue(db: D1Database, storage: StorageBackend): Promise<void> {
   const { results } = await db
     .prepare(
       `SELECT t.id, t.file_ref, t.source_path, t.title, t.suffix, ar.name as artist_name
