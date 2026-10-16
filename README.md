@@ -88,9 +88,11 @@ Redeploy and the cache is live. There's no size limit on the library itself — 
 
 ## Implemented endpoints
 
-`ping` `getLicense` `getMusicFolders` `getIndexes` `getArtists` `getArtist` `getAlbum` `getSong` `getAlbumList2` `getGenres` `search3` `stream` `download` `getCoverArt` `getPlaylists` `getPlaylist` `createPlaylist` `updatePlaylist` `deletePlaylist` `getRandomSongs` `scrobble` `star` `unstar` `getStarred` `getStarred2` `setRating` `getLyrics` `getOpenSubsonicExtensions` `getLyricsBySongId` `getPlayQueue` `savePlayQueue` `getArtistInfo` `getArtistInfo2` `getTopSongs` `getSimilarSongs2`
+`ping` `getLicense` `getMusicFolders` `getIndexes` `getMusicDirectory` `getArtists` `getArtist` `getAlbum` `getSong` `getAlbumList2` `getGenres` `search3` `stream` `download` `getCoverArt` `getPlaylists` `getPlaylist` `createPlaylist` `updatePlaylist` `deletePlaylist` `getRandomSongs` `scrobble` `star` `unstar` `getStarred` `getStarred2` `setRating` `getLyrics` `getOpenSubsonicExtensions` `getLyricsBySongId` `getPlayQueue` `savePlayQueue` `getArtistInfo` `getArtistInfo2` `getTopSongs` `getSimilarSongs2`
 
 `scrobble` (`submission=true`, the default) increments the track's `play_count` and updates `last_played`; `submission=false` ("now playing" notifications) is currently ignored outright. `star`/`unstar` accept any combination of `id` (track) / `albumId` / `artistId`. `getStarred`/`getStarred2` return the same favorites data, just under a different top-level tag (`starred` vs `starred2`) — both use this project's native ID3 structure. `setRating` sets a track's 1–5 star `userRating` (`rating=0` clears it); ratings are per-track only, no album/artist rating.
+
+`getMusicFolders` lists two music folders over the same library: 1 "Music" (by artist, the default) and 2 "Folders" (the folder tree). Clients that browse with `getIndexes` + `getMusicDirectory` (DSub, Ultrasonic, …) get artists → albums → songs by default, or the folder tree when "Folders" is picked as the music folder (folder ids are `dir:` + path).
 
 `getRandomSongs` blends in recent activity rather than picking uniformly at random: 30% of the results are drawn from starred (favorite) tracks and 30% from the most recently added 100 tracks, with the rest genuinely random — so both favorites and new music surface in the feed without crowding out discovery.
 
@@ -277,6 +279,13 @@ Folder listings read per-folder totals off an index on a `dir` column (the paren
 The trash, retry queue and their indexes are plain `CREATE TABLE IF NOT EXISTS`, so `npm run db:migrate:remote` adds them to an existing database.
 
 **Editing tags and covers**: "Edit tags…" in the Folders menu (any mix of songs and folders — a folder means every song under it), the ✎ button on Songs/Album rows, and "✎ Edit" on an album page (name, album artist, year, genre, cover). These change the library's metadata in D1 only; the audio files in Telegram are never rewritten. Song ids don't change, so favorites, ratings, play counts and playlists stay attached. Changing the artist or album moves the songs to the album with that name — the same one an upload with those tags would land in, so renaming onto an existing album merges into it — and albums/artists left empty are removed, with their favorites moved along. Year and genre are stored per album, so they apply to the whole album. A new cover (or artist photo, from the artist page) is resized in the browser to at most 1200px, stored in Telegram, and the old image deleted unless something else (including a trash entry) still uses it.
+
+**Storage** (Folders sidebar → ▤ Storage): total size and length, the trash, the R2 cache (used vs. cap), cover counts, space per top-level folder and per format, songs added per month, and the largest files (flagging any over Telegram's 20 MB download limit, which can't be played). Two maintenance tools live there too:
+
+- **Telegram captions**: every song's message in the channel gets a caption with its path and song id, so the channel is readable on its own and could be used to rebuild the library. New uploads are captioned right away; moving, renaming or restoring under a new name queues an update in a `caption_queue` table, worked off by a cron every 2 minutes (10 edits per run, about 300 an hour, leaving room for uploads under Telegram's per-channel limit). "Caption all songs…" queues every song once — for songs uploaded before captions existed. Editing a caption needs the bot to be able to edit its posts in the channel; songs whose message is gone are reported as failed.
+- **Integrity check**: asks Telegram (`getFile`, no download) about every song and cover file, in batches the page drives, and lists the ones that can't be fetched — missing, or over 20 MB — with a button to move the broken songs to the trash.
+
+The `caption_queue` table is a plain `CREATE TABLE IF NOT EXISTS`, so `npm run db:migrate:remote` adds it.
 
 **Duplicates** (Folders sidebar → ⧉ Duplicates): groups of songs with the same title and artist and about the same length (within 3 seconds), or of exactly the same size and format. The first song of each group is the suggested one to keep — a favorite, then higher rating, bitrate, size, play count. "Select all but the suggested" and one click moves the rest to the trash, with Undo.
 

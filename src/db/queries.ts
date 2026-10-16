@@ -778,8 +778,11 @@ function stripArticle(name: string): string {
   return name.replace(/^(the|a|an)\s+/i, "");
 }
 
+export const artistIdFor = (name: string) => md5Hex(`artist:${name.toLowerCase()}`);
+export const albumIdFor = (artistId: string, name: string) => md5Hex(`album:${artistId}:${name.toLowerCase()}`);
+
 export async function ensureArtist(db: D1Database, name: string): Promise<string> {
-  const id = md5Hex(`artist:${name.toLowerCase()}`);
+  const id = artistIdFor(name);
   await db
     .prepare(`INSERT INTO artists (id, name, sort_name) VALUES (?, ?, ?) ON CONFLICT(id) DO NOTHING`)
     .bind(id, name, stripArticle(name))
@@ -794,7 +797,7 @@ export async function ensureAlbum(
   year: number | null,
   genre: string | null,
 ): Promise<string> {
-  const id = md5Hex(`album:${artistId}:${name.toLowerCase()}`);
+  const id = albumIdFor(artistId, name);
   await db
     .prepare(
       `INSERT INTO albums (id, name, artist_id, year, genre, created_at) VALUES (?, ?, ?, ?, ?, ?)
@@ -819,6 +822,8 @@ export interface NewTrackInput {
   fileRef: string;
   sourcePath: string | null;
   filename: string;
+  // From freeTrackId beforehand (uploadTrack needs it for the caption).
+  id?: string;
 }
 
 // The id scheme is md5 of album + file name (same as scripts/import.ts), so
@@ -826,7 +831,10 @@ export interface NewTrackInput {
 // those fall back to also hashing the folder path. Never returns an id
 // that's already taken — insertTrack's ON CONFLICT DO NOTHING would
 // otherwise silently keep the other track.
-async function freeTrackId(db: D1Database, input: NewTrackInput): Promise<string> {
+export async function freeTrackId(
+  db: D1Database,
+  input: Pick<NewTrackInput, "albumId" | "filename" | "sourcePath">,
+): Promise<string> {
   const seeds = [`track:${input.albumId}:${input.filename}`, `track:${input.albumId}:${input.sourcePath ?? input.filename}`];
   for (let i = 0; ; i++) {
     const id = md5Hex(seeds[i] ?? `${seeds[1]}:${i}`);
@@ -836,7 +844,7 @@ async function freeTrackId(db: D1Database, input: NewTrackInput): Promise<string
 }
 
 export async function insertTrack(db: D1Database, input: NewTrackInput): Promise<string> {
-  const id = await freeTrackId(db, input);
+  const id = input.id ?? (await freeTrackId(db, input));
   await db
     .prepare(
       `INSERT INTO tracks
@@ -1036,5 +1044,10 @@ export async function listDuplicateTracks(db: D1Database, mode: "tags" | "size")
            (SELECT lower(trim(title)), artist_id FROM tracks GROUP BY 1, 2 HAVING COUNT(*) > 1)
          ORDER BY lower(trim(t.title)), t.artist_id, t.duration, t.created_at`;
   const { results } = await db.prepare(sql).all<TrackRow>();
+  return results;
+}
+
+export async function listLargestTracks(db: D1Database, limit: number): Promise<TrackRow[]> {
+  const { results } = await db.prepare(`${TRACK_SELECT} ORDER BY t.size DESC LIMIT ?`).bind(limit).all<TrackRow>();
   return results;
 }

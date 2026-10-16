@@ -16,6 +16,8 @@ import * as media from "./subsonic/media";
 import * as folders from "./subsonic/folders";
 import * as trash from "./subsonic/trash";
 import * as metadata from "./subsonic/metadata";
+import * as captions from "./subsonic/captions";
+import * as storageInfo from "./subsonic/storage";
 import * as q from "./db/queries";
 import { fetchLyrics, fetchStructuredLyrics } from "./lyrics";
 import { TelegramStorage, TelegramRateLimitError } from "./storage/telegram";
@@ -79,6 +81,9 @@ function makeStorage(env: Env, ctx: ExecutionContext): StorageBackend {
     : telegram;
 }
 
+// Must match the daily entry in wrangler.toml's [triggers] crons.
+const DAILY_CRON = "17 3 * * *";
+
 function retentionDays(env: Env): number {
   const days = Number(env.TRASH_RETENTION_DAYS);
   return days > 0 ? days : trash.DEFAULT_RETENTION_DAYS;
@@ -140,7 +145,18 @@ export default {
         return respond(subsonicSuccess(browsing.getMusicFolders()), format);
 
       case "getIndexes":
-        return respond(subsonicSuccess(await browsing.getIndexes(env.DB, auth.username)), format);
+        return respond(
+          subsonicSuccess(await browsing.getIndexes(env.DB, auth.username, params.get("musicFolderId"))),
+          format,
+        );
+
+      case "getMusicDirectory": {
+        const id = params.get("id");
+        if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
+        const directory = await browsing.getMusicDirectory(env.DB, auth.username, id);
+        if (!directory) return respond(subsonicError(ERR.NOT_FOUND, "Directory not found"), format);
+        return respond(subsonicSuccess(directory), format);
+      }
 
       case "getArtists":
         return respond(subsonicSuccess(await browsing.getArtists(env.DB, auth.username)), format);
@@ -736,6 +752,11 @@ export default {
           }
         }
         const sourcePath = folder ? `${folder}/${storedName}` : null;
+        // Ids are known up front (they're hashes), so the Telegram message
+        // can carry its caption from the start.
+        const albumId = q.albumIdFor(q.artistIdFor(artistName), albumName);
+        const trackId = await q.freeTrackId(env.DB, { albumId, filename: storedName, sourcePath });
+        const caption = captions.captionFor({ id: trackId, source_path: sourcePath, title, artist_name: artistName, suffix });
 
         // Telegram first, D1 after: a failed upload (most likely Telegram's
         // rate limit, in a batch) then leaves nothing behind, instead of an
@@ -743,7 +764,7 @@ export default {
         // propagate as a bare non-JSON 500, which the client couldn't read.
         let fileRef: string;
         try {
-          fileRef = await storage.putFile(bytes, filename, contentType);
+          fileRef = await storage.putFile(bytes, filename, contentType, caption);
         } catch (err) {
           if (err instanceof TelegramRateLimitError) {
             return respond(subsonicError(0, err.message, { retryAfter: err.retryAfter }), format);
@@ -752,8 +773,9 @@ export default {
           return respond(subsonicError(0, `Upload failed: ${message}`), format);
         }
         const artistId = await q.ensureArtist(env.DB, artistName);
-        const albumId = await q.ensureAlbum(env.DB, albumName, artistId, year, genre);
-        const trackId = await q.insertTrack(env.DB, {
+        await q.ensureAlbum(env.DB, albumName, artistId, year, genre);
+        await q.insertTrack(env.DB, {
+          id: trackId,
           albumId,
           artistId,
           title,
@@ -1012,6 +1034,72 @@ export default {
         );
       }
 
+      // The Storage page: totals, where the space goes, cache and queues.
+      case "getStorageStats": {
+        const stats = await storageInfo.storageStats(
+          env.DB,
+          !!env.CACHE_BUCKET,
+          env.CACHE_MAX_BYTES ? Number(env.CACHE_MAX_BYTES) : DEFAULT_CACHE_MAX_BYTES,
+        );
+        const bucket = (tag: string) => (b: storageInfo.Bucket) => node(tag, { ...b });
+        return respond(
+          subsonicSuccess(
+            node(
+              "storageStats",
+              { songCount: stats.songCount, size: stats.size, duration: stats.duration, pendingDeletes: stats.pendingDeletes },
+              {
+                single: {
+                  covers: node("covers", { ...stats.covers }),
+                  trash: node("trash", { ...stats.trash }),
+                  cache: node("cache", { ...stats.cache }),
+                  captions: node("captions", { ...stats.captions }),
+                },
+                lists: {
+                  folder: stats.folders.map(bucket("folder")),
+                  format: stats.formats.map(bucket("format")),
+                  month: stats.months.map(bucket("month")),
+                  largest: stats.largest.map((t) => ({ ...songNode(t), tag: "largest" })),
+                },
+              },
+            ),
+          ),
+          format,
+        );
+      }
+
+      // One batch of the integrity check (kind=songs|covers, after=cursor).
+      // Call again with the returned `next` until it's absent.
+      case "checkFiles": {
+        const kind = params.get("kind") === "covers" ? "covers" : "songs";
+        try {
+          const result = await storageInfo.checkFiles(env.DB, storage, kind, params.get("after") ?? "");
+          return respond(
+            subsonicSuccess(
+              node(
+                "fileCheck",
+                { checked: result.checked, total: result.total, next: result.next },
+                { lists: { problem: result.problems.map((p) => node("problem", { ...p })) } },
+              ),
+            ),
+            format,
+          );
+        } catch (err) {
+          if (err instanceof TelegramRateLimitError) {
+            return respond(subsonicError(0, err.message, { retryAfter: err.retryAfter }), format);
+          }
+          throw err;
+        }
+      }
+
+      // Queues caption updates for every song (all=true) — the one-off
+      // backfill for songs uploaded before captions existed — or clears the
+      // ones that gave up (clearFailed=true). The cron does the work.
+      case "queueCaptions": {
+        if (params.get("clearFailed") === "true") await captions.clearFailedCaptions(env.DB);
+        if (params.get("all") === "true") await captions.enqueueUnderStatement(env.DB, "").run();
+        return respond(subsonicSuccess(node("captions", { ...(await captions.captionStatus(env.DB)) })), format);
+      }
+
       default:
         return respond(subsonicError(0, `Unsupported endpoint: ${endpoint}`), format);
       }
@@ -1028,9 +1116,12 @@ export default {
     }
   },
 
-  // Daily cron (wrangler.toml [triggers]): empties trash entries older than
-  // TRASH_RETENTION_DAYS and retries Telegram deletes that failed earlier.
-  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    await trash.dailyCleanup(env.DB, makeStorage(env, ctx), retentionDays(env));
+  // Crons (wrangler.toml [triggers]). Daily: empties trash entries older
+  // than TRASH_RETENTION_DAYS and retries Telegram deletes that failed
+  // earlier. Every few minutes: works off the caption queue.
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    const storage = makeStorage(env, ctx);
+    if (controller.cron === DAILY_CRON) await trash.dailyCleanup(env.DB, storage, retentionDays(env));
+    else await captions.processCaptionQueue(env.DB, storage);
   },
 } satisfies ExportedHandler<Env>;

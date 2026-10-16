@@ -1,4 +1,4 @@
-import type { DeleteFilesResult, SourceStorage, StorageBackend } from "./types";
+import type { DeleteFilesResult, FileCheck, SourceStorage, StorageBackend } from "./types";
 import { parseRange, rangeHeaders } from "./range";
 import * as cache from "../db/cache";
 
@@ -20,8 +20,16 @@ export class CachedStorage implements StorageBackend {
     private ctx: ExecutionContext,
   ) {}
 
-  async putFile(bytes: Uint8Array, filename: string, mimeType: string): Promise<string> {
-    return this.source.putFile(bytes, filename, mimeType);
+  async putFile(bytes: Uint8Array, filename: string, mimeType: string, caption?: string): Promise<string> {
+    return this.source.putFile(bytes, filename, mimeType, caption);
+  }
+
+  setCaption(ref: string, caption: string): Promise<"ok" | "missing"> {
+    return this.source.setCaption(ref, caption);
+  }
+
+  checkFile(ref: string): Promise<FileCheck> {
+    return this.source.checkFile(ref);
   }
 
   async deleteFile(ref: string): Promise<void> {

@@ -87,9 +87,11 @@ npm run db:migrate:remote
 
 ## 已实现的端点
 
-`ping` `getLicense` `getMusicFolders` `getIndexes` `getArtists` `getArtist` `getAlbum` `getSong` `getAlbumList2` `getGenres` `search3` `stream` `download` `getCoverArt` `getPlaylists` `getPlaylist` `createPlaylist` `updatePlaylist` `deletePlaylist` `getRandomSongs` `scrobble` `star` `unstar` `getStarred` `getStarred2` `setRating` `getLyrics` `getOpenSubsonicExtensions` `getLyricsBySongId` `getPlayQueue` `savePlayQueue` `getArtistInfo` `getArtistInfo2` `getTopSongs` `getSimilarSongs2`
+`ping` `getLicense` `getMusicFolders` `getIndexes` `getMusicDirectory` `getArtists` `getArtist` `getAlbum` `getSong` `getAlbumList2` `getGenres` `search3` `stream` `download` `getCoverArt` `getPlaylists` `getPlaylist` `createPlaylist` `updatePlaylist` `deletePlaylist` `getRandomSongs` `scrobble` `star` `unstar` `getStarred` `getStarred2` `setRating` `getLyrics` `getOpenSubsonicExtensions` `getLyricsBySongId` `getPlayQueue` `savePlayQueue` `getArtistInfo` `getArtistInfo2` `getTopSongs` `getSimilarSongs2`
 
 `scrobble`（`submission=true`，默认值）会给对应 track 的 `play_count` 加一、更新 `last_played`；`submission=false`（"正在播放"通知）目前直接忽略，不做处理。`star`/`unstar` 接受 `id`（曲目）/`albumId`/`artistId` 中的任意组合；`getStarred`/`getStarred2` 返回同一份收藏数据，只是外层标签不同（`starred` vs `starred2`），走的都是这个项目原生的 ID3 结构。`setRating` 给曲目打 1–5 星的 `userRating`（`rating=0` 清除评分）；评分只针对单曲，没有专辑/艺人维度的评分。
+
+`getMusicFolders` 对同一个歌库给出两个音乐文件夹：1「Music」（按艺人，默认）和 2「Folders」（文件夹树）。用 `getIndexes` + `getMusicDirectory` 浏览的客户端（DSub、Ultrasonic 等）默认看到的是 艺人 → 专辑 → 歌曲；在客户端里把音乐文件夹选成「Folders」，就能按文件夹树浏览（文件夹的 id 是 `dir:` 加路径）。
 
 `getRandomSongs` 不是完全均匀随机：30% 从收藏（星标）曲目里抽，30% 从最近新增的 100 首曲目里抽，剩下的才是真随机——这样收藏和新歌都能在随机列表里露面，又不会把发现新歌的随机性挤掉。
 
@@ -272,6 +274,13 @@ npm run fix-covers -- --artist-photos [--limit=N] [--dry-run] [--retry-failed]
 回收站、重试队列和它们的索引都是 `CREATE TABLE IF NOT EXISTS`，所以对已有数据库跑一次 `npm run db:migrate:remote` 就能加上。
 
 **编辑标签和封面**：入口有 Folders 菜单里的「Edit tags…」（歌曲和文件夹可以混选，选文件夹等于选它下面的所有歌）、Songs/Album 列表行上的 ✎ 按钮，以及专辑页的「✎ Edit」（专辑名、专辑艺人、年份、流派、封面）。这些只改 D1 里的歌库信息，Telegram 里的音频文件不会被改写。歌曲 id 不变，所以收藏、评分、播放次数和歌单都不受影响。改艺人或专辑时，歌曲会移到同名的专辑里——跟带这些标签上传时会进的是同一个专辑，所以改成一个已有专辑的名字就等于合并进去；因此变空的专辑和艺人会被删掉，它们的收藏会跟着歌曲转过去。年份和流派是存在专辑上的，所以会作用于整张专辑。新封面（或者在艺人页换的艺人照片）会先在浏览器里缩到最长边 1200px 以内，再存进 Telegram；旧图片如果没有别的地方在用（包括回收站里的记录），会从 Telegram 删掉。
+
+**存储空间**（Folders 侧栏的 ▤ Storage）：总大小和总时长、回收站、R2 缓存（已用/上限）、封面数量、各顶层文件夹和各格式的占用、每月新增，以及最大的几个文件（超过 Telegram 20MB 下载上限、没法播放的会标出来）。这个页面上还有两个维护工具：
+
+- **Telegram 消息说明（caption）**：频道里每首歌的消息都会带上一段说明，写着它的路径和歌曲 id，这样频道本身也看得懂，必要时还能拿来重建歌库。新上传的歌立即带上；移动、改名、或者还原时改了名，会在 `caption_queue` 表里排队，由每 2 分钟一次的 Cron 处理（每次 10 条，约每小时 300 条，给上传留出 Telegram 每个频道的速率余量）。「Caption all songs…」会把所有歌各排一次——用于加上这个功能之前上传的歌。修改说明需要 bot 能编辑自己在频道里发的消息；消息已经不存在的歌会记为失败。
+- **完整性检查**：逐个向 Telegram 查询（`getFile`，不下载）每首歌和每张封面的文件，由页面分批驱动，列出取不到的——已经不存在，或者超过 20MB——并且可以一键把这些坏掉的歌移进回收站。
+
+`caption_queue` 表也是 `CREATE TABLE IF NOT EXISTS`，跑一次 `npm run db:migrate:remote` 就能加上。
 
 **查找重复**（Folders 侧栏的 ⧉ Duplicates）：按「标题和艺人相同、时长相差 3 秒以内」或者「文件大小和格式完全相同」分组。每组第一首是建议保留的那首——优先收藏过的，其次是评分、码率、文件大小、播放次数更高的。点「Select all but the suggested」再一键就能把其余的移进回收站，可以撤销。
 

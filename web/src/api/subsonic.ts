@@ -641,3 +641,82 @@ export async function getDuplicates(mode: DuplicateMode): Promise<Song[][]> {
   const body = await call<{ duplicates: { group?: { song: Song[] }[] } }>("getDuplicates", { mode });
   return (body.duplicates.group ?? []).map((g) => g.song);
 }
+
+// --- storage page (src/subsonic/storage.ts, captions.ts) ---
+
+export interface StorageBucket {
+  name: string;
+  songCount: number;
+  size: number;
+}
+
+export interface CaptionStatus {
+  queued: number;
+  failed: number;
+  lastError?: string;
+}
+
+export interface StorageStats {
+  songCount: number;
+  size: number;
+  duration: number;
+  pendingDeletes: number;
+  folders: StorageBucket[];
+  formats: StorageBucket[];
+  months: StorageBucket[];
+  covers: { albums: number; albumsWithCover: number; artistsWithPhoto: number; songCovers: number };
+  trash: { entries: number; songCount: number; size: number };
+  cache: { enabled: boolean; size: number; entries: number; maxBytes: number };
+  captions: CaptionStatus;
+  largest: Song[];
+}
+
+export async function getStorageStats(): Promise<StorageStats> {
+  const body = await call<{ storageStats: any }>("getStorageStats");
+  const s = body.storageStats;
+  return {
+    ...s,
+    folders: s.folder ?? [],
+    formats: s.format ?? [],
+    months: s.month ?? [],
+    largest: s.largest ?? [],
+  };
+}
+
+// all: queue a caption update for every song; clearFailed: forget the ones
+// that gave up.
+export async function queueCaptions(opts: { all?: boolean; clearFailed?: boolean }): Promise<CaptionStatus> {
+  const body = await callPost<{ captions: CaptionStatus }>("queueCaptions", {
+    all: opts.all ? "true" : undefined,
+    clearFailed: opts.clearFailed ? "true" : undefined,
+  });
+  return body.captions;
+}
+
+export interface FileProblem {
+  kind: "song" | "album" | "artist" | "songCover";
+  id: string;
+  name: string;
+  path?: string;
+  error: string;
+}
+
+export interface FileCheckBatch {
+  checked: number;
+  total: number;
+  next?: string;
+  problems: FileProblem[];
+}
+
+// One batch of the integrity check. Throws UploadError with retryAfter when
+// Telegram asks to slow down (same shape as uploads).
+export async function checkFiles(kind: "songs" | "covers", after: string): Promise<FileCheckBatch> {
+  const res = await fetch(buildUrl("checkFiles", { kind, after }));
+  const body = ((await res.json()) as { "subsonic-response": any })["subsonic-response"];
+  if (body.status !== "ok") {
+    const err = body.error ?? {};
+    throw new UploadError(err.message ?? "Check failed", err.retryAfter);
+  }
+  const r = body.fileCheck;
+  return { checked: r.checked, total: r.total, next: r.next, problems: r.problem ?? [] };
+}

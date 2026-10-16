@@ -4,14 +4,23 @@
 // only surface the rest of the app talks to means swapping Telegram for R2/S3
 // later only means writing a new class here — no schema or route changes.
 export interface StorageBackend {
-  putFile(bytes: Uint8Array, filename: string, mimeType: string): Promise<string>;
+  // `caption`: text stored alongside the file where the backend can (a
+  // Telegram message caption), so the storage stays readable on its own.
+  putFile(bytes: Uint8Array, filename: string, mimeType: string, caption?: string): Promise<string>;
   getFileResponse(ref: string, rangeHeader: string | null, contentType?: string): Promise<Response>;
   deleteFile(ref: string): Promise<void>;
   // Bulk version of deleteFile for folder/multi-select deletes. Doesn't
   // throw on failure: reports which refs couldn't be deleted (and why) so the
   // caller can queue them for a retry.
   deleteFiles(refs: string[]): Promise<DeleteFilesResult>;
+  // Replaces a stored file's caption. "missing": the file's message no
+  // longer exists. Throws TelegramRateLimitError when told to slow down.
+  setCaption(ref: string, caption: string): Promise<"ok" | "missing">;
+  // Whether a file can still be fetched (without downloading it).
+  checkFile(ref: string): Promise<FileCheck>;
 }
+
+export type FileCheck = { ok: true; size?: number } | { ok: false; error: string };
 
 // A backend that can also hand back a whole file's raw bytes in one shot.
 // CachedStorage (cached.ts) needs this from whatever backend it wraps, to

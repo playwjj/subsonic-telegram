@@ -15,6 +15,7 @@ const routes = [
     props: true,
   },
   { path: "/trash", name: "trash", component: () => import("./views/TrashView.vue") },
+  { path: "/storage", name: "storage", component: () => import("./views/StorageView.vue") },
   { path: "/duplicates", name: "duplicates", component: () => import("./views/DuplicatesView.vue") },
   { path: "/favorites", name: "favorites", component: () => import("./views/FavoritesView.vue") },
   { path: "/search", name: "search", component: () => import("./views/SearchView.vue") },

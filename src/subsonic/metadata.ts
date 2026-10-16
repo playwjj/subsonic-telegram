@@ -1,7 +1,6 @@
 // Tag editing, cover art replacement and duplicate finding for the web UI.
 // Tags here are the library's own metadata in D1 — the audio files in
 // Telegram are never rewritten.
-import { md5Hex } from "../md5";
 import * as q from "../db/queries";
 import type { StorageBackend } from "../storage/types";
 import { deleteFilesOrQueue } from "./folders";
@@ -32,8 +31,7 @@ interface EditRow {
 
 // Same natural-key ids as ensureArtist/ensureAlbum (and scripts/import.ts),
 // so an edited song lands in the very album an upload of the same name would.
-const artistIdFor = (name: string) => md5Hex(`artist:${name.toLowerCase()}`);
-const albumIdFor = (artistId: string, name: string) => md5Hex(`album:${artistId}:${name.toLowerCase()}`);
+const { artistIdFor, albumIdFor } = q;
 const sortName = (name: string) => name.replace(/^(the|a|an)\s+/i, "");
 
 async function rowsFor(db: D1Database, ids: string[], paths: string[]): Promise<EditRow[]> {

@@ -1,4 +1,4 @@
-import type { DeleteFilesResult, StorageBackend } from "./types";
+import type { DeleteFilesResult, FileCheck, StorageBackend } from "./types";
 import { parseRange, rangeHeaders } from "./range";
 
 interface TelegramRef {
@@ -19,6 +19,12 @@ export class TelegramRateLimitError extends Error {
   }
 }
 
+// Bot API caption limit, in characters.
+const MAX_CAPTION = 1024;
+function truncateCaption(text: string): string {
+  return text.length <= MAX_CAPTION ? text : `${text.slice(0, MAX_CAPTION - 1)}…`;
+}
+
 // Bot API's deleteMessages takes at most this many message ids per call.
 const MAX_DELETE_BATCH = 100;
 
@@ -32,13 +38,14 @@ export class TelegramStorage implements StorageBackend {
     return `https://api.telegram.org/bot${this.botToken}/${method}`;
   }
 
-  async putFile(bytes: Uint8Array, filename: string, mimeType: string): Promise<string> {
+  async putFile(bytes: Uint8Array, filename: string, mimeType: string, caption?: string): Promise<string> {
     if (bytes.byteLength > MAX_UPLOAD_BYTES) {
       throw new Error(`File exceeds Telegram Bot API upload limit (${MAX_UPLOAD_BYTES} bytes): ${filename}`);
     }
     const form = new FormData();
     form.set("chat_id", this.channelId);
     form.set("document", new Blob([bytes], { type: mimeType }), filename);
+    if (caption) form.set("caption", truncateCaption(caption));
 
     const res = await fetch(this.api("sendDocument"), { method: "POST", body: form });
     const data = (await res.json()) as any;
@@ -145,5 +152,35 @@ export class TelegramStorage implements StorageBackend {
       }
     }
     return { failed, error };
+  }
+
+  // Needs the bot to be able to edit its own posts in the channel (part of
+  // "Post messages"). Telegram rejects an unchanged caption with "message
+  // is not modified" — that counts as done.
+  async setCaption(refStr: string, caption: string): Promise<"ok" | "missing"> {
+    const ref = JSON.parse(refStr) as TelegramRef;
+    const res = await fetch(this.api("editMessageCaption"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: this.channelId, message_id: ref.messageId, caption: truncateCaption(caption) }),
+    });
+    const data = (await res.json()) as any;
+    if (data.ok) return "ok";
+    const description = String(data.description ?? "");
+    if (data.error_code === 429) throw new TelegramRateLimitError(Number(data.parameters?.retry_after) || 30);
+    if (description.includes("message is not modified")) return "ok";
+    if (/message to edit not found|MESSAGE_ID_INVALID/i.test(description)) return "missing";
+    throw new Error(`Telegram editMessageCaption failed: ${description || JSON.stringify(data)}`);
+  }
+
+  // getFile is what streaming starts with, so a file that passes here can be
+  // played. Files over 20MB fail it with "file is too big".
+  async checkFile(refStr: string): Promise<FileCheck> {
+    const ref = JSON.parse(refStr) as TelegramRef;
+    const res = await fetch(this.api(`getFile?file_id=${encodeURIComponent(ref.fileId)}`));
+    const data = (await res.json()) as any;
+    if (data.ok) return { ok: true, size: data.result.file_size };
+    if (data.error_code === 429) throw new TelegramRateLimitError(Number(data.parameters?.retry_after) || 30);
+    return { ok: false, error: String(data.description ?? `HTTP ${res.status}`) };
   }
 }

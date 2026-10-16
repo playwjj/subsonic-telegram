@@ -164,3 +164,15 @@ CREATE TABLE IF NOT EXISTS pending_deletes (
   last_error TEXT,
   created_at INTEGER NOT NULL
 );
+
+-- Songs whose Telegram message caption (file path + song id, see
+-- src/subsonic/captions.ts) needs to be (re)written: after a move or rename,
+-- or for every song once the backfill is started from the Storage page.
+-- Worked off a few at a time by a cron, to stay well under Telegram's rate
+-- limits. attempts >= 5 means it gave up (last_error says why).
+CREATE TABLE IF NOT EXISTS caption_queue (
+  track_id   TEXT PRIMARY KEY,
+  queued_at  INTEGER NOT NULL,
+  attempts   INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT
+);

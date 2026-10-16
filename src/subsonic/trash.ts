@@ -6,6 +6,7 @@
 import * as q from "../db/queries";
 import * as t from "../db/trash";
 import type { StorageBackend } from "../storage/types";
+import { enqueueIdsStatement } from "./captions";
 import {
   FolderError,
   baseName,
@@ -118,7 +119,9 @@ export async function restoreTrash(db: D1Database, storage: StorageBackend, entr
   }
 
   const recreated = await t.getMissingAlbumsAndArtists(db, ids);
-  await db.batch(t.restoreStatements(db, ids, renames, recreated));
+  // Songs that came back under a new name need their caption redone.
+  const recaption = enqueueIdsStatement(db, Object.keys(renames));
+  await db.batch([...t.restoreStatements(db, ids, renames, recreated), ...(recaption ? [recaption] : [])]);
   await deleteFilesOrQueue(db, storage, superseded);
   return { restored: restoring.length, renamed: Object.keys(renames).length, skipped: snapshots.length - restoring.length };
 }

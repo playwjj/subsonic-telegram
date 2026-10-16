@@ -761,6 +761,7 @@ const columns: { key: SortKey; label: string; class: string }[] = [
         {{ folderTree.root.songCount.toLocaleString() }} songs · {{ formatBytes(folderTree.root.size) }}
       </p>
       <div class="sidebar-links">
+        <RouterLink :to="{ name: 'storage' }">▤ Storage</RouterLink>
         <RouterLink :to="{ name: 'duplicates' }">⧉ Duplicates</RouterLink>
         <RouterLink :to="{ name: 'trash' }">🗑 Trash</RouterLink>
       </div>
@@ -796,6 +797,7 @@ const columns: { key: SortKey; label: string; class: string }[] = [
           title="Shuffle everything in this folder, including subfolders"
           :load="() => getShuffleSongs({ path: currentPath })"
         />
+        <RouterLink :to="{ name: 'storage' }" class="narrow-link" title="Storage">▤</RouterLink>
         <RouterLink :to="{ name: 'duplicates' }" class="narrow-link" title="Find duplicates">⧉</RouterLink>
         <RouterLink :to="{ name: 'trash' }" class="narrow-link" title="Trash">🗑</RouterLink>
         <input v-model="query" type="search" class="search ml-auto" placeholder="Search in this folder…" />
