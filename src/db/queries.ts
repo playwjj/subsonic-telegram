@@ -821,8 +821,22 @@ export interface NewTrackInput {
   filename: string;
 }
 
+// The id scheme is md5 of album + file name (same as scripts/import.ts), so
+// the same file name in the same album but a different folder would clash;
+// those fall back to also hashing the folder path. Never returns an id
+// that's already taken — insertTrack's ON CONFLICT DO NOTHING would
+// otherwise silently keep the other track.
+async function freeTrackId(db: D1Database, input: NewTrackInput): Promise<string> {
+  const seeds = [`track:${input.albumId}:${input.filename}`, `track:${input.albumId}:${input.sourcePath ?? input.filename}`];
+  for (let i = 0; ; i++) {
+    const id = md5Hex(seeds[i] ?? `${seeds[1]}:${i}`);
+    const taken = await db.prepare(`SELECT 1 FROM tracks WHERE id = ?`).bind(id).first();
+    if (!taken) return id;
+  }
+}
+
 export async function insertTrack(db: D1Database, input: NewTrackInput): Promise<string> {
-  const id = md5Hex(`track:${input.albumId}:${input.filename}`);
+  const id = await freeTrackId(db, input);
   await db
     .prepare(
       `INSERT INTO tracks

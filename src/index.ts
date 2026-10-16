@@ -17,7 +17,7 @@ import * as folders from "./subsonic/folders";
 import * as trash from "./subsonic/trash";
 import * as q from "./db/queries";
 import { fetchLyrics, fetchStructuredLyrics } from "./lyrics";
-import { TelegramStorage } from "./storage/telegram";
+import { TelegramStorage, TelegramRateLimitError } from "./storage/telegram";
 import { CachedStorage, cacheKey } from "./storage/cached";
 import * as cache from "./db/cache";
 import * as trashDb from "./db/trash";
@@ -108,9 +108,14 @@ export default {
 
     // POSTed form fields count as params too (OpenSubsonic "formPost"): the
     // web UI's multi-select actions send hundreds of ids, more than fits in a
-    // URL. Other POST bodies (uploadTrack's raw file) are left alone.
+    // URL. uploadTrack's body is always the raw file, whatever Content-Type
+    // the client put on it (curl, for one, defaults to form-urlencoded).
     const params = new URLSearchParams(url.search);
-    if (request.method === "POST" && request.headers.get("Content-Type")?.startsWith("application/x-www-form-urlencoded")) {
+    if (
+      request.method === "POST" &&
+      endpoint !== "uploadTrack" &&
+      request.headers.get("Content-Type")?.startsWith("application/x-www-form-urlencoded")
+    ) {
       for (const [key, value] of new URLSearchParams(await request.text())) params.append(key, value);
     }
     const format = params.get("f");
@@ -711,39 +716,57 @@ export default {
         const duration = params.get("duration") ? Math.round(Number(params.get("duration"))) : null;
         const bitrate = params.get("bitrate") ? Math.round(Number(params.get("bitrate"))) : null;
         const folder = sanitizeFolderPath(params.get("folder") ?? "");
-        const sourcePath = folder ? `${folder}/${filename}` : null;
         const suffix = filename.includes(".") ? filename.slice(filename.lastIndexOf(".") + 1).toLowerCase() : "";
 
-        // Without this, a thrown error here (most likely storage.putFile
-        // hitting Telegram) would propagate as an uncaught exception —
-        // Workers then returns a plain-text/HTML 500, which isn't valid
-        // JSON, so the client can't show the real reason and just reports a
-        // generic "Upload failed".
+        // A file of the same name already in that folder: "skip" refuses
+        // (reported with exists=true, so a batch upload can count it as
+        // skipped rather than failed); "rename" (the default) stores this
+        // one as "name (1).ext".
+        let storedName = filename;
+        if (folder) {
+          const taken = await folders.childNames(env.DB, folder);
+          if (taken.has(filename)) {
+            if (params.get("onConflict") === "skip") {
+              return respond(subsonicError(0, `"${filename}" already exists in ${folder}`, { exists: true }), format);
+            }
+            storedName = folders.uniqueName(filename, taken, true);
+          }
+        }
+        const sourcePath = folder ? `${folder}/${storedName}` : null;
+
+        // Telegram first, D1 after: a failed upload (most likely Telegram's
+        // rate limit, in a batch) then leaves nothing behind, instead of an
+        // artist/album with no tracks. Errors are caught rather than left to
+        // propagate as a bare non-JSON 500, which the client couldn't read.
+        let fileRef: string;
         try {
-          const artistId = await q.ensureArtist(env.DB, artistName);
-          const albumId = await q.ensureAlbum(env.DB, albumName, artistId, year, genre);
-          const fileRef = await storage.putFile(bytes, filename, contentType);
-          const trackId = await q.insertTrack(env.DB, {
-            albumId,
-            artistId,
-            title,
-            trackNo,
-            discNo,
-            duration,
-            suffix,
-            contentType,
-            size: bytes.byteLength,
-            bitrate,
-            fileRef,
-            sourcePath,
-            filename,
-          });
-          const track = await q.getTrack(env.DB, trackId);
-          return respond(subsonicSuccess(songNode(track!)), format);
+          fileRef = await storage.putFile(bytes, filename, contentType);
         } catch (err) {
+          if (err instanceof TelegramRateLimitError) {
+            return respond(subsonicError(0, err.message, { retryAfter: err.retryAfter }), format);
+          }
           const message = err instanceof Error ? err.message : String(err);
           return respond(subsonicError(0, `Upload failed: ${message}`), format);
         }
+        const artistId = await q.ensureArtist(env.DB, artistName);
+        const albumId = await q.ensureAlbum(env.DB, albumName, artistId, year, genre);
+        const trackId = await q.insertTrack(env.DB, {
+          albumId,
+          artistId,
+          title,
+          trackNo,
+          discNo,
+          duration,
+          suffix,
+          contentType,
+          size: bytes.byteLength,
+          bitrate,
+          fileRef,
+          sourcePath,
+          filename: storedName,
+        });
+        const track = await q.getTrack(env.DB, trackId);
+        return respond(subsonicSuccess(songNode(track!)), format);
       }
 
       // Moves the song to the trash (see src/subsonic/trash.ts).

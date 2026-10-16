@@ -110,7 +110,7 @@ export async function folderTree(db: D1Database): Promise<{ root: FolderStats; f
 }
 
 // Names already taken directly inside `dir`, by files or subfolders.
-async function childNames(db: D1Database, dir: string): Promise<Set<string>> {
+export async function childNames(db: D1Database, dir: string): Promise<Set<string>> {
   const [tracks, subfolders] = await Promise.all([q.listTracksInDir(db, dir), listSubfolders(db, dir)]);
   return new Set([...tracks.map((t) => baseName(t.source_path!)), ...subfolders.map((f) => f.name)]);
 }

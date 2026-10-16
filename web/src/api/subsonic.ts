@@ -510,9 +510,32 @@ export interface UploadTrackMetadata {
   duration?: number;
   bitrate?: number;
   folder?: string;
+  // Same file name already in `folder`: "rename" (default) stores this one
+  // as "name (1).ext", "skip" fails with UploadError.exists.
+  onConflict?: "rename" | "skip";
 }
 
-export async function uploadTrack(file: File, metadata: UploadTrackMetadata): Promise<Song> {
+// An uploadTrack failure, with what the batch uploader needs to react:
+// Telegram's rate limit (wait retryAfter seconds, then retry), or the file
+// already existing (counts as skipped, not failed).
+export class UploadError extends SubsonicError {
+  retryAfter?: number;
+  exists: boolean;
+  constructor(message: string, retryAfter?: number, exists = false) {
+    super(0, message);
+    this.retryAfter = retryAfter;
+    this.exists = exists;
+  }
+}
+
+// XHR rather than fetch, for upload progress. `progress` gets the fraction
+// of the file sent to the Worker (0..1); after 1 the Worker is still
+// passing it on to Telegram. abort() on the returned handle cancels.
+export function uploadTrack(
+  file: File,
+  metadata: UploadTrackMetadata,
+  progress?: (fraction: number) => void,
+): { done: Promise<Song>; abort: () => void } {
   const search = buildSearch(
     {
       title: metadata.title,
@@ -525,26 +548,34 @@ export async function uploadTrack(file: File, metadata: UploadTrackMetadata): Pr
       duration: metadata.duration,
       bitrate: metadata.bitrate,
       folder: metadata.folder,
+      onConflict: metadata.onConflict,
       filename: file.name,
       contentType: file.type || "application/octet-stream",
     },
     getCredentials(),
   );
-  const res = await fetch(`/rest/uploadTrack.view?${search.toString()}`, { method: "POST", body: file });
-  // A non-2xx from in front of the Worker (e.g. an edge timeout/size limit)
-  // won't be JSON at all — surface the raw status instead of letting
-  // res.json() throw an opaque SyntaxError.
-  let data: { "subsonic-response": any };
-  try {
-    data = (await res.json()) as { "subsonic-response": any };
-  } catch {
-    throw new SubsonicError(0, `Upload failed: HTTP ${res.status} ${res.statusText}`);
-  }
-  const body = data["subsonic-response"];
-  if (body.status !== "ok") {
-    throw new SubsonicError(body.error?.code ?? 0, body.error?.message ?? "Unknown error");
-  }
-  return body.song as Song;
+  const xhr = new XMLHttpRequest();
+  const done = new Promise<Song>((resolve, reject) => {
+    xhr.open("POST", `/rest/uploadTrack.view?${search.toString()}`);
+    xhr.upload.onprogress = (e) => e.lengthComputable && progress?.(e.loaded / e.total);
+    xhr.onerror = () => reject(new UploadError("Network error — check your connection"));
+    xhr.onabort = () => reject(new UploadError("Cancelled"));
+    xhr.onload = () => {
+      // A non-2xx from in front of the Worker (e.g. an edge timeout/size
+      // limit) won't be JSON at all — surface the raw status instead.
+      let body: any;
+      try {
+        body = JSON.parse(xhr.responseText)["subsonic-response"];
+      } catch {
+        return reject(new UploadError(`Upload failed: HTTP ${xhr.status} ${xhr.statusText}`));
+      }
+      if (body.status === "ok") return resolve(body.song as Song);
+      const err = body.error ?? {};
+      reject(new UploadError(err.message ?? "Upload failed", err.retryAfter, !!err.exists));
+    };
+    xhr.send(file);
+  });
+  return { done, abort: () => xhr.abort() };
 }
 
 export async function deleteTrack(id: string): Promise<void> {

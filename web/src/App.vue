@@ -2,6 +2,15 @@
 import { useRoute, useRouter } from "vue-router";
 import { isLoggedIn, logout } from "./stores/auth";
 import PlayerBar from "./components/PlayerBar.vue";
+import UploadPanel from "./components/upload/UploadPanel.vue";
+
+// A file dropped anywhere that isn't a drop zone would make the browser
+// open it, navigating away from the app (and any running uploads).
+for (const type of ["dragover", "drop"]) {
+  window.addEventListener(type, (e) => {
+    if ((e as DragEvent).dataTransfer?.types.includes("Files")) e.preventDefault();
+  });
+}
 
 const route = useRoute();
 const router = useRouter();
@@ -57,6 +66,7 @@ async function handleLogout() {
       <RouterView />
     </main>
 
+    <UploadPanel v-if="isLoggedIn() && route.name !== 'login'" />
     <PlayerBar v-if="isLoggedIn() && route.name !== 'login'" />
   </div>
 </template>

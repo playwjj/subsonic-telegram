@@ -11,6 +11,14 @@ interface TelegramRef {
 // exceeds that, putFile() throws and the caller (import script) skips it.
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
+// Telegram answered 429: too many messages to the channel too quickly
+// (roughly 20/minute). retryAfter is how many seconds it says to wait.
+export class TelegramRateLimitError extends Error {
+  constructor(public retryAfter: number) {
+    super(`Telegram rate limit — retry after ${retryAfter}s`);
+  }
+}
+
 // Bot API's deleteMessages takes at most this many message ids per call.
 const MAX_DELETE_BATCH = 100;
 
@@ -35,6 +43,7 @@ export class TelegramStorage implements StorageBackend {
     const res = await fetch(this.api("sendDocument"), { method: "POST", body: form });
     const data = (await res.json()) as any;
     if (!data.ok) {
+      if (data.error_code === 429) throw new TelegramRateLimitError(Number(data.parameters?.retry_after) || 30);
       throw new Error(`Telegram sendDocument failed: ${JSON.stringify(data)}`);
     }
     const message = data.result;

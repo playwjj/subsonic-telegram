@@ -20,11 +20,12 @@ import {
 } from "../api/subsonic";
 import { addToQueue, currentTrack, playNext, playQueue } from "../stores/player";
 import { canDropInto, drag, folderTree, loadFolderTree, type DragPayload } from "../stores/folders";
+import { uploads } from "../stores/uploads";
+import { AUDIO_EXTENSIONS, fromDataTransfer, fromFileList, isFileDrag, type PickedFile } from "../utils/pickFiles";
 import { baseName, formatBytes, formatDate, formatDuration, joinPath, parentOf } from "../utils/format";
 import ShuffleButton from "../components/ShuffleButton.vue";
-import Modal from "../components/Modal.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
-import UploadForm from "../components/UploadForm.vue";
+import UploadDialog from "../components/upload/UploadDialog.vue";
 import AddToPlaylistDialog from "../components/AddToPlaylistDialog.vue";
 import FolderTree from "../components/drive/FolderTree.vue";
 import MoveDialog from "../components/drive/MoveDialog.vue";
@@ -524,8 +525,64 @@ async function download(list: Song[]) {
 
 const playlistDialog = ref<string[] | null>(null);
 const propertiesDialog = ref<{ song?: Song; folder?: FolderDir & { path: string } } | null>(null);
-const showUploadModal = ref(false);
-const uploadModalTitle = computed(() => `Upload to ${currentPath.value || "the root folder"}`);
+// --- upload: pick files/a folder, or drop them from the OS onto the view ---
+
+const uploadDialog = ref<PickedFile[] | null>(null);
+const fileInput = ref<HTMLInputElement | null>(null);
+const folderInput = ref<HTMLInputElement | null>(null);
+
+function onPicked(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const picked = fromFileList(input.files);
+  input.value = "";
+  if (picked.length) uploadDialog.value = picked;
+}
+
+function openUploadMenu(e: MouseEvent) {
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  menu.value = {
+    x: rect.left,
+    y: rect.bottom + 4,
+    items: [
+      { label: "Upload files…", action: () => fileInput.value?.click() },
+      { label: "Upload a folder…", action: () => folderInput.value?.click() },
+    ],
+  };
+}
+
+// dragover fires continuously while over the view; the overlay hides
+// shortly after it stops (dragleave is unreliable across child elements).
+const fileDragOver = ref(false);
+let fileDragTimer: ReturnType<typeof setTimeout> | undefined;
+
+function onViewDragOver(e: DragEvent) {
+  if (drag.payload || !isFileDrag(e)) return; // rows being moved, not files
+  e.preventDefault();
+  fileDragOver.value = true;
+  clearTimeout(fileDragTimer);
+  fileDragTimer = setTimeout(() => (fileDragOver.value = false), 150);
+}
+
+async function onViewDrop(e: DragEvent) {
+  if (drag.payload || !e.dataTransfer || !isFileDrag(e)) return;
+  e.preventDefault();
+  fileDragOver.value = false;
+  const picked = await fromDataTransfer(e.dataTransfer);
+  if (picked.length) uploadDialog.value = picked;
+}
+
+// Uploads finish in the background (stores/uploads.ts): refresh once a
+// burst of them settles, whichever folder they went to (totals change too).
+let uploadRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+watch(
+  () => uploads.completed,
+  () => {
+    clearTimeout(uploadRefreshTimer);
+    uploadRefreshTimer = setTimeout(() => {
+      if (!renamingKey.value && !creatingFolder.value) refresh();
+    }, 1200);
+  },
+);
 
 function onAddedToPlaylist(name: string) {
   playlistDialog.value = null;
@@ -577,7 +634,8 @@ function selectionActions(list: Entry[]): MenuItem[] {
 function backgroundActions(): MenuItem[] {
   return [
     { label: "New folder", action: startCreateFolder },
-    { label: "Upload here…", action: () => (showUploadModal.value = true) },
+    { label: "Upload files…", action: () => fileInput.value?.click() },
+    { label: "Upload a folder…", action: () => folderInput.value?.click() },
     { label: "Play all", separated: true, action: playFolder },
     { label: "Select all", action: selectAll },
   ];
@@ -615,7 +673,7 @@ const dialogOpen = computed(
       deleteDialog.value ||
       playlistDialog.value ||
       propertiesDialog.value ||
-      showUploadModal.value
+      uploadDialog.value
     ),
 );
 
@@ -675,7 +733,7 @@ const columns: { key: SortKey; label: string; class: string }[] = [
 </script>
 
 <template>
-  <div class="drive">
+  <div class="drive" @dragover="onViewDragOver" @drop="onViewDrop">
     <aside class="sidebar glass">
       <FolderTree :selected="currentPath" accept-drops @select="navigate" @drop="dropInto" />
       <p v-if="folderTree.loaded" class="mt-2 border-t border-[var(--border)] px-2 pt-2 text-xs text-[var(--text-dim)]">
@@ -704,7 +762,9 @@ const columns: { key: SortKey; label: string; class: string }[] = [
 
       <!-- Toolbar -->
       <div class="mb-3 flex flex-wrap items-center gap-2 text-sm">
-        <button @click="showUploadModal = true">⬆ Upload</button>
+        <button @click="openUploadMenu">⬆ Upload ▾</button>
+        <input ref="fileInput" type="file" multiple :accept="AUDIO_EXTENSIONS.join(',')" hidden @change="onPicked" />
+        <input ref="folderInput" type="file" webkitdirectory hidden @change="onPicked" />
         <button @click="startCreateFolder">+ New folder</button>
         <button :disabled="!entries.length" @click="playFolder">▶ Play all</button>
         <ShuffleButton
@@ -750,7 +810,7 @@ const columns: { key: SortKey; label: string; class: string }[] = [
       </p>
       <template v-else>
         <p v-if="!entries.length && !creatingFolder" class="py-10 text-center text-[var(--text-dim)]">
-          {{ searching ? "No matches in this folder." : "This folder is empty — upload something or drag items here." }}
+          {{ searching ? "No matches in this folder." : "This folder is empty — drop files or folders here to upload, or drag items in from elsewhere." }}
         </p>
 
         <!-- List view -->
@@ -1011,9 +1071,11 @@ const columns: { key: SortKey; label: string; class: string }[] = [
       @close="propertiesDialog = null"
     />
 
-    <Modal v-if="showUploadModal" :title="uploadModalTitle" @close="showUploadModal = false">
-      <UploadForm :preset-folder="currentPath" @uploaded="refresh" />
-    </Modal>
+    <UploadDialog v-if="uploadDialog" :picked="uploadDialog" :folder="currentPath" @close="uploadDialog = null" />
+
+    <div v-if="fileDragOver" class="file-drop-overlay">
+      <div>⬆ Drop to upload to “{{ currentPath || "the root folder" }}”</div>
+    </div>
   </div>
 </template>
 
@@ -1347,6 +1409,19 @@ const columns: { key: SortKey; label: string; class: string }[] = [
   .trash-button {
     display: block;
   }
+}
+.file-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background: rgba(11, 13, 18, 0.6);
+  border: 3px dashed var(--accent);
+  font-size: 1.1rem;
+  color: var(--accent);
 }
 .notice-action {
   margin-left: 0.75rem;

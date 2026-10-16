@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from "vue";
 
-defineProps<{ title?: string }>();
+defineProps<{ title?: string; wide?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 
 function onKeydown(e: KeyboardEvent) {
@@ -15,7 +15,7 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
 <template>
   <Teleport to="body">
     <div class="backdrop" @click.self="emit('close')">
-      <div class="panel glass">
+      <div class="panel glass" :class="{ wide }">
         <div class="mb-3 flex items-center justify-between gap-2">
           <h2 v-if="title" class="text-lg font-semibold">{{ title }}</h2>
           <button type="button" class="close-btn ml-auto" title="Close" @click="emit('close')">✕</button>
@@ -44,6 +44,9 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
   overflow-y: auto;
   padding: 1.25rem;
   background: rgba(23, 26, 33, 0.96);
+}
+.panel.wide {
+  max-width: 44rem;
 }
 .close-btn {
   display: flex;

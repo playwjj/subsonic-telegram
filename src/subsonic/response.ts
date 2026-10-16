@@ -10,11 +10,13 @@ export function subsonicSuccess(body?: SNode): SNode {
   );
 }
 
-export function subsonicError(code: number, message: string): SNode {
+// `extra` adds attributes to the <error> node beyond the standard
+// code/message — e.g. uploadTrack's retryAfter, for this project's web UI.
+export function subsonicError(code: number, message: string, extra?: Record<string, string | number | boolean>): SNode {
   return node(
     "subsonic-response",
     { status: "failed", version: API_VERSION },
-    { single: { error: node("error", { code, message }) } },
+    { single: { error: node("error", { code, message, ...extra }) } },
   );
 }
 

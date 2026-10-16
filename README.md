@@ -240,7 +240,7 @@ Add these repository secrets before enabling the workflow: `TG_BOT_TOKEN`, `TG_C
 
 ## Web UI
 
-`web/` is a Vue 3 + Vite single-page app that calls the `/rest/*` API directly (the same interface third-party Subsonic clients use), providing a browsing/playback/playlist-management UI, plus a file-manager-style Folders page (multi-select, move, rename, recursive delete) and one-at-a-time upload for managing the library directly from the browser (bulk import still stays the CLI script's job — see [Managing the library from the Web UI](#managing-the-library-from-the-web-ui) below).
+`web/` is a Vue 3 + Vite single-page app that calls the `/rest/*` API directly (the same interface third-party Subsonic clients use), providing a browsing/playback/playlist-management UI, plus a file-manager-style Folders page (multi-select, move, rename, recursive delete) and batch upload (files or whole folders) for managing the library directly from the browser (bulk import still stays the CLI script's job — see [Managing the library from the Web UI](#managing-the-library-from-the-web-ui) below).
 
 **Pages**: Home (library stats + recently added/recently played/most played), Artists (browse by ID3 artist/album), Songs (a flat, sortable, paginated track list), Folders (browse by the original local folder structure — see below), Favorites (starred songs/albums/artists via `getStarred2`, with Play all/Shuffle), Search, Playlists.
 
@@ -250,11 +250,13 @@ Add these repository secrets before enabling the workflow: `TG_BOT_TOKEN`, `TG_C
 
 ### Managing the library from the Web UI
 
-The Upload page (nav bar → Upload) and "⬆ Upload here" from any Folders page (opens the same upload form in a modal, pre-filled with the current folder, so uploading doesn't navigate away — the folder view refreshes in place once it's done) both add one track at a time — a dropzone accepts drag-and-drop or a regular file picker. Tags (artist/album/title/year/genre/track/disc number) are read client-side in the browser, via `music-metadata`'s `parseBlob`, and pre-fill an editable form; parsing failures just leave the fields blank (title falls back to the filename) rather than blocking the upload. The Worker itself does no tag parsing — this keeps it dependency-free and running in the plain Workers runtime, same as everywhere else in `src/`.
+**Uploading** works in batches. Drop audio files or whole folders onto any Folders page (they go into the folder you're looking at), use its "⬆ Upload ▾" button (files or a folder), or the Upload page in the nav bar (defaults to this month's `Uploads/YYYY-MM` folder). A review dialog comes first: the destination folder (editable), each file with the tags read from it, optional artist/album/genre/year to apply to the whole batch, files that are too large, and files whose name already exists in the destination, which you can either skip or upload as `name (1).ext`. Dropped folders keep their structure under the destination; non-audio files that came along (covers, `.lrc`, `.cue`…) are left out. Uploads then run in the background from a queue shown in a panel at the bottom right, two at a time, with per-file progress. They keep going while you browse other pages, can be cancelled or retried one by one, and the Folders view refreshes as they finish.
 
+- Tags (artist/album/title/year/genre/track/disc number) are read client-side in the browser, via `music-metadata`'s `parseBlob`. A file without tags still uploads: the title falls back to the file name and the album to its folder's name (skipping `CD1`/`Disc 2`-style folders). The Worker itself does no tag parsing — this keeps it dependency-free and running in the plain Workers runtime, same as everywhere else in `src/`.
+- Telegram accepts roughly 20 uploads a minute per channel. When it answers 429, `uploadTrack` passes on its `retryAfter`, and the queue pauses for that long (with a countdown in the panel) before carrying on — big batches just take a while.
+- The file goes to Telegram before anything is written to D1, so a failed upload leaves no empty artist/album behind. A file with the same name and album as one in another folder gets its own track id instead of being mistaken for that one.
 - Same 19MB cap as `npm run import` (Telegram's `getFile` download limit) — a file that uploaded past that could never be streamed back, so it's rejected client-side and server-side both.
-- The optional "Folder" field (e.g. `80s/Rock`) sets `source_path`, so the track shows up under Folders too — leave it blank and the track just won't appear there (only under Artists/Songs).
-- Cover art isn't handled by this form; a new album created this way simply has no cover, same as any album whose `cover_ref` is unset.
+- Cover art isn't uploaded; a new album created this way simply has no cover, same as any album whose `cover_ref` is unset.
 - **Deleting a track** (the 🗑 button on Songs/Album rows — not on playlist or search views, which have their own non-destructive "remove from playlist"/nothing) moves it to the trash (see below).
 
 **The Folders page works like a file manager**:
