@@ -49,6 +49,13 @@ const SCREWS = [
   [310, 190],
 ];
 
+const KEYS = [
+  { x: 34, label: "◀◀", title: "Previous", action: () => prev() },
+  { x: 92, label: "▶", title: "Play / pause", action: () => toggle() },
+  { x: 150, label: "▶▶", title: "Next", action: () => next() },
+  { x: 208, label: "■", title: "Stop", action: () => stop() },
+];
+
 function stop() {
   if (playerState.isPlaying) toggle();
 }
@@ -191,11 +198,19 @@ onUnmounted(() => {
         </div>
 
         <header class="top">
-          <button class="icon-btn" title="Collapse (Esc)" @click="setView('bar')">⌄</button>
+          <button class="icon-btn" title="Collapse (Esc)" @click="setView('bar')">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+          </button>
           <div class="top-right">
-            <button class="icon-btn small" title="Minimize" @click="setView('mini')">–</button>
-            <button class="icon-btn small" title="Restore" @click="setView('bar')">▭</button>
-            <button class="icon-btn small" title="Close" @click="closePlayer">✕</button>
+            <button class="icon-btn small" title="Minimize" @click="setView('mini')">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12" /></svg>
+            </button>
+            <button class="icon-btn small" title="Restore" @click="setView('bar')">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8h14v8H5z" /></svg>
+            </button>
+            <button class="icon-btn small" title="Close" @click="closePlayer">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            </button>
           </div>
         </header>
 
@@ -204,110 +219,233 @@ onUnmounted(() => {
             <!-- A portable cassette player: the tape shows through the lid,
                  the reels turn while playing, and the tape pack moves from
                  the left reel to the right one as the song progresses. -->
-            <svg class="walkman" viewBox="0 0 360 300" role="img" aria-label="Cassette player">
+            <svg class="walkman" viewBox="0 0 360 312" role="img" aria-label="Cassette player">
               <defs>
                 <linearGradient id="wm-metal" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" stop-color="#dfe2e7" />
-                  <stop offset="0.5" stop-color="#a7acb5" />
-                  <stop offset="1" stop-color="#7d828c" />
+                  <stop offset="0" stop-color="#f4f5f7" />
+                  <stop offset="0.18" stop-color="#d5d8de" />
+                  <stop offset="0.55" stop-color="#afb4bd" />
+                  <stop offset="0.85" stop-color="#979ca5" />
+                  <stop offset="1" stop-color="#868b95" />
                 </linearGradient>
+                <linearGradient id="wm-side" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#5d626b" />
+                  <stop offset="1" stop-color="#34373d" />
+                </linearGradient>
+                <!-- edge bevel: lit from above, shaded below -->
+                <linearGradient id="wm-bevel" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#fff" stop-opacity="0.95" />
+                  <stop offset="0.45" stop-color="#fff" stop-opacity="0.15" />
+                  <stop offset="1" stop-color="#000" stop-opacity="0.35" />
+                </linearGradient>
+                <!-- the reverse, for edges cut into the body (the lid recess) -->
+                <linearGradient id="wm-groove" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#000" stop-opacity="0.45" />
+                  <stop offset="0.6" stop-color="#000" stop-opacity="0.1" />
+                  <stop offset="1" stop-color="#fff" stop-opacity="0.85" />
+                </linearGradient>
+                <linearGradient id="wm-sheen" x1="0" y1="0" x2="1" y2="0.55">
+                  <stop offset="0.2" stop-color="#fff" stop-opacity="0" />
+                  <stop offset="0.34" stop-color="#fff" stop-opacity="0.5" />
+                  <stop offset="0.42" stop-color="#fff" stop-opacity="0" />
+                  <stop offset="0.66" stop-color="#fff" stop-opacity="0" />
+                  <stop offset="0.72" stop-color="#fff" stop-opacity="0.18" />
+                  <stop offset="0.78" stop-color="#fff" stop-opacity="0" />
+                </linearGradient>
+                <pattern id="wm-brush" width="6" height="2" patternUnits="userSpaceOnUse">
+                  <rect width="6" height="0.8" fill="#fff" fill-opacity="0.12" />
+                </pattern>
                 <linearGradient id="wm-key" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" stop-color="#f1f2f4" />
-                  <stop offset="1" stop-color="#a3a8b0" />
+                  <stop offset="0" stop-color="#ffffff" />
+                  <stop offset="0.45" stop-color="#e2e4e8" />
+                  <stop offset="1" stop-color="#b3b7bf" />
+                </linearGradient>
+                <linearGradient id="wm-recess-shadow" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#000" stop-opacity="0.7" />
+                  <stop offset="0.12" stop-color="#000" stop-opacity="0" />
                 </linearGradient>
                 <linearGradient id="wm-glass" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0" stop-color="#fff" stop-opacity="0.22" />
-                  <stop offset="0.32" stop-color="#fff" stop-opacity="0.05" />
-                  <stop offset="0.33" stop-color="#fff" stop-opacity="0" />
-                  <stop offset="0.55" stop-color="#fff" stop-opacity="0.07" />
-                  <stop offset="1" stop-color="#fff" stop-opacity="0" />
+                  <stop offset="0" stop-color="#fff" stop-opacity="0.2" />
+                  <stop offset="0.3" stop-color="#fff" stop-opacity="0.04" />
+                  <stop offset="0.31" stop-color="#fff" stop-opacity="0" />
+                  <stop offset="1" stop-color="#9fb4d8" stop-opacity="0.08" />
                 </linearGradient>
+                <linearGradient id="wm-shell" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#3a3d45" />
+                  <stop offset="1" stop-color="#1b1d22" />
+                </linearGradient>
+                <linearGradient id="wm-paper" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#faf5e9" />
+                  <stop offset="1" stop-color="#e9dfc8" />
+                </linearGradient>
+                <radialGradient id="wm-pack">
+                  <stop offset="0" stop-color="#22170f" />
+                  <stop offset="0.7" stop-color="#4a3426" />
+                  <stop offset="0.93" stop-color="#6d4f3b" />
+                  <stop offset="1" stop-color="#3a281d" />
+                </radialGradient>
+                <radialGradient id="wm-hub" cx="0.4" cy="0.35">
+                  <stop offset="0" stop-color="#ffffff" />
+                  <stop offset="1" stop-color="#cfc9bc" />
+                </radialGradient>
+                <radialGradient id="wm-screw" cx="0.35" cy="0.3">
+                  <stop offset="0" stop-color="#9aa0aa" />
+                  <stop offset="1" stop-color="#3c4048" />
+                </radialGradient>
+                <linearGradient id="wm-wheel" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="#3b3f46" />
+                  <stop offset="0.5" stop-color="#9196a0" />
+                  <stop offset="1" stop-color="#3b3f46" />
+                </linearGradient>
+                <radialGradient id="wm-led-on" cx="0.4" cy="0.35">
+                  <stop offset="0" stop-color="#e6fff0" />
+                  <stop offset="0.45" stop-color="#4dff88" />
+                  <stop offset="1" stop-color="#119140" />
+                </radialGradient>
+                <radialGradient id="wm-led-off" cx="0.4" cy="0.35">
+                  <stop offset="0" stop-color="#5d6b61" />
+                  <stop offset="1" stop-color="#1d2520" />
+                </radialGradient>
+                <filter id="wm-tape-shadow" x="-10%" y="-10%" width="120%" height="130%">
+                  <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000" flood-opacity="0.7" />
+                </filter>
+                <clipPath id="wm-body"><rect x="4" y="26" width="352" height="270" rx="20" /></clipPath>
+                <clipPath id="wm-lid"><rect x="22" y="46" width="316" height="206" rx="12" /></clipPath>
                 <clipPath id="wm-window"><rect x="74" y="66" width="172" height="52" rx="26" /></clipPath>
               </defs>
 
-              <!-- transport keys along the top edge -->
-              <g class="key" @click.stop="prev">
-                <title>Previous</title>
-                <rect x="34" y="6" width="52" height="30" rx="5" fill="url(#wm-key)" />
-                <text x="60" y="25">◀◀</text>
-              </g>
-              <g class="key" :class="{ pressed: playerState.isPlaying }" @click.stop="toggle">
-                <title>Play / pause</title>
-                <rect x="92" y="6" width="52" height="30" rx="5" fill="url(#wm-key)" />
-                <text x="118" y="25">▶</text>
-              </g>
-              <g class="key" @click.stop="next">
-                <title>Next</title>
-                <rect x="150" y="6" width="52" height="30" rx="5" fill="url(#wm-key)" />
-                <text x="176" y="25">▶▶</text>
-              </g>
-              <g class="key" @click.stop="stop">
-                <title>Stop</title>
-                <rect x="208" y="6" width="52" height="30" rx="5" fill="url(#wm-key)" />
-                <text x="234" y="25">■</text>
+              <!-- transport keys along the top edge; each has a side face for depth -->
+              <g
+                v-for="key in KEYS"
+                :key="key.x"
+                class="key"
+                :class="{ pressed: key.label === '▶' && playerState.isPlaying }"
+                @click.stop="key.action"
+              >
+                <title>{{ key.title }}</title>
+                <rect :x="key.x" y="10" width="52" height="30" rx="5" fill="#6b7079" />
+                <rect :x="key.x" y="6" width="52" height="30" rx="5" fill="url(#wm-key)" />
+                <path :d="`M${key.x + 5} 7 H${key.x + 47}`" stroke="#fff" stroke-opacity="0.9" />
+                <text :x="key.x + 26" y="25">{{ key.label }}</text>
               </g>
 
-              <!-- body -->
+              <!-- body: thickness, metal face, brushed lines, gloss, bevel -->
+              <rect x="4" y="34" width="352" height="270" rx="20" fill="url(#wm-side)" />
               <rect x="4" y="26" width="352" height="270" rx="20" fill="url(#wm-metal)" />
-              <rect x="5.5" y="27.5" width="349" height="267" rx="19" fill="none" stroke="#fff" stroke-opacity="0.45" />
-              <circle cx="318" cy="36" r="4" fill="#2b2e35" />
-              <g class="wheel">
-                <rect x="352" y="96" width="7" height="64" rx="3" fill="#5d626b" />
-                <path d="M352 104h7M352 112h7M352 120h7M352 128h7M352 136h7M352 144h7M352 152h7" stroke="#3a3e45" />
+              <g clip-path="url(#wm-body)">
+                <rect x="4" y="26" width="352" height="270" fill="url(#wm-brush)" />
+                <rect
+                  x="-60"
+                  y="26"
+                  width="480"
+                  height="270"
+                  fill="url(#wm-sheen)"
+                />
               </g>
+              <rect x="5" y="27" width="350" height="268" rx="19" fill="none" stroke="url(#wm-bevel)" stroke-width="2" />
 
-              <!-- lid window with the cassette behind it -->
-              <rect x="22" y="46" width="316" height="206" rx="12" fill="#101116" />
-              <Transition name="tape">
-                <g :key="currentTrack.id" class="tape-slot">
-                  <g transform="translate(42.5 63) scale(0.86)">
-                    <rect width="320" height="200" rx="12" fill="#25282f" />
-                    <!-- plain retro label; the album cover lives beside the title instead -->
-                    <rect x="20" y="12" width="280" height="124" rx="6" fill="#f3ecdc" />
-                    <rect
-                      v-for="(color, i) in STRIPES"
-                      :key="color"
-                      x="20"
-                      :y="82 + i * 5"
-                      width="280"
-                      height="5"
-                      :fill="color"
-                    />
-                    <text x="30" y="32" class="side">A</text>
-                    <text x="48" y="32" class="tape-title">{{ labelTitle }}</text>
-                    <path d="M30 40 H290" stroke="#cdbf9f" />
-                    <text x="30" y="56" class="tape-artist">{{ labelArtist }}</text>
-                    <text x="290" y="56" class="tape-type">C-60</text>
-                    <circle v-for="[x, y] in SCREWS" :key="`${x}-${y}`" :cx="x" :cy="y" r="3.5" fill="#4a4e57" />
+              <!-- headphone jack -->
+              <circle cx="318" cy="36" r="5.5" fill="#c9ccd2" stroke="#7d828b" stroke-width="0.8" />
+              <circle cx="318" cy="36" r="3.2" fill="#14161a" />
 
-                    <rect x="74" y="66" width="172" height="52" rx="26" fill="#0a0a0c" />
-                    <g clip-path="url(#wm-window)">
-                      <circle cx="112" cy="92" :r="leftR" fill="#4b3427" />
-                      <circle cx="208" cy="92" :r="rightR" fill="#4b3427" />
-                    </g>
-                    <g v-for="cx in [112, 208]" :key="cx" :transform="`translate(${cx} 92)`">
-                      <g class="reel" :class="{ spinning: playerState.isPlaying }">
-                        <circle r="12" fill="#ebe7de" />
-                        <rect v-for="i in 6" :key="i" x="-1.6" y="-11" width="3.2" height="5" fill="#3a3d44" :transform="`rotate(${i * 60})`" />
-                        <circle r="3.5" fill="#25282f" />
+              <!-- volume wheel on the side -->
+              <rect x="352" y="96" width="8" height="64" rx="3" fill="url(#wm-wheel)" />
+              <path
+                d="M352 102h8M352 108h8M352 114h8M352 120h8M352 126h8M352 132h8M352 138h8M352 144h8M352 150h8M352 156h8"
+                stroke="#2c2f35"
+                stroke-opacity="0.7"
+              />
+
+              <!-- lid: a recess in the body, the cassette, then glass -->
+              <rect x="17" y="41" width="326" height="216" rx="16" fill="none" stroke="url(#wm-groove)" stroke-width="3" />
+              <rect x="22" y="46" width="316" height="206" rx="12" fill="#0c0d11" />
+              <g clip-path="url(#wm-lid)">
+                <Transition name="tape">
+                  <g :key="currentTrack.id" class="tape-slot">
+                    <g transform="translate(42.5 63) scale(0.86)" filter="url(#wm-tape-shadow)">
+                      <rect width="320" height="200" rx="12" fill="url(#wm-shell)" />
+                      <path d="M12 1.5 H308" stroke="#fff" stroke-opacity="0.35" />
+                      <!-- plain retro label; the album cover lives beside the title instead -->
+                      <rect x="20" y="12" width="280" height="124" rx="6" fill="url(#wm-paper)" />
+                      <rect
+                        v-for="(color, i) in STRIPES"
+                        :key="color"
+                        x="20"
+                        :y="82 + i * 5"
+                        width="280"
+                        height="5"
+                        :fill="color"
+                      />
+                      <text x="30" y="32" class="side">A</text>
+                      <text x="48" y="32" class="tape-title">{{ labelTitle }}</text>
+                      <path d="M30 40 H290" stroke="#cdbf9f" />
+                      <text x="30" y="56" class="tape-artist">{{ labelArtist }}</text>
+                      <text x="290" y="56" class="tape-type">C-60</text>
+                      <g v-for="[x, y] in SCREWS" :key="`${x}-${y}`">
+                        <circle :cx="x" :cy="y" r="4" fill="url(#wm-screw)" />
+                        <path :d="`M${x - 2.6} ${y + 1.5} L${x + 2.6} ${y - 1.5}`" stroke="#202227" stroke-width="1" />
                       </g>
+
+                      <rect x="74" y="66" width="172" height="52" rx="26" fill="#08080a" />
+                      <g clip-path="url(#wm-window)">
+                        <circle cx="112" cy="92" :r="leftR" fill="url(#wm-pack)" />
+                        <circle cx="208" cy="92" :r="rightR" fill="url(#wm-pack)" />
+                      </g>
+                      <g v-for="cx in [112, 208]" :key="cx" :transform="`translate(${cx} 92)`">
+                        <g class="reel" :class="{ spinning: playerState.isPlaying }">
+                          <circle r="12" fill="url(#wm-hub)" />
+                          <rect
+                            v-for="i in 6"
+                            :key="i"
+                            x="-1.6"
+                            y="-11"
+                            width="3.2"
+                            height="5"
+                            fill="#3a3d44"
+                            :transform="`rotate(${i * 60})`"
+                          />
+                          <circle r="3.5" fill="#25282f" />
+                        </g>
+                      </g>
+                      <!-- the tape window's own clear plastic -->
+                      <rect x="74" y="66" width="172" height="52" rx="26" fill="none" stroke="#fff" stroke-opacity="0.3" stroke-width="2" />
+                      <path d="M92 70 H228" stroke="#fff" stroke-opacity="0.18" stroke-width="3" stroke-linecap="round" />
+
+                      <path d="M64 200 L80 158 L240 158 L256 200 Z" fill="#2c2f36" />
+                      <path d="M80 158.5 L240 158.5" stroke="#fff" stroke-opacity="0.15" />
+                      <circle cx="104" cy="181" r="6" fill="#08080a" />
+                      <circle cx="216" cy="181" r="6" fill="#08080a" />
+                      <rect x="148" y="172" width="24" height="12" rx="2" fill="#08080a" />
+                      <path d="M84 197 H236" stroke="#4b3427" stroke-width="2.5" />
                     </g>
-                    <rect x="74" y="66" width="172" height="52" rx="26" fill="none" stroke="#fff" stroke-opacity="0.25" stroke-width="2" />
-
-                    <path d="M64 200 L80 158 L240 158 L256 200 Z" fill="#30333b" />
-                    <circle cx="104" cy="181" r="6" fill="#0a0a0c" />
-                    <circle cx="216" cy="181" r="6" fill="#0a0a0c" />
-                    <rect x="148" y="172" width="24" height="12" rx="2" fill="#0a0a0c" />
-                    <path d="M84 197 H236" stroke="#4b3427" stroke-width="2.5" />
                   </g>
-                </g>
-              </Transition>
-              <rect x="22" y="46" width="316" height="206" rx="12" fill="url(#wm-glass)" stroke="#2b2e35" stroke-width="2" />
+                </Transition>
+                <!-- shadow cast by the bezel onto the tape, then the glass -->
+                <rect x="22" y="46" width="316" height="206" fill="url(#wm-recess-shadow)" />
+                <rect x="22" y="46" width="316" height="206" fill="url(#wm-glass)" />
+                <path
+                  d="M40 46 L118 46 L52 252 L22 252 L22 90 Z"
+                  fill="#fff"
+                  fill-opacity="0.06"
+                />
+              </g>
+              <rect x="22.5" y="46.5" width="315" height="205" rx="11.5" fill="none" stroke="#000" stroke-opacity="0.6" />
+              <path d="M34 48 H326" stroke="#fff" stroke-opacity="0.22" />
 
-              <!-- nameplate + play light -->
-              <text x="26" y="278" class="brand">STEREO CASSETTE PLAYER</text>
-              <text x="296" y="278" class="led-label">PLAY</text>
-              <circle cx="330" cy="274" r="4.5" class="led" :class="{ on: playerState.isPlaying }" />
+              <!-- nameplate (engraved: light edge under dark text) + play light -->
+              <text x="26" y="281" class="brand engrave">STEREO CASSETTE PLAYER</text>
+              <text x="26" y="280" class="brand">STEREO CASSETTE PLAYER</text>
+              <text x="296" y="280" class="led-label">PLAY</text>
+              <circle cx="330" cy="276" r="6.5" fill="#6b7079" stroke="url(#wm-groove)" />
+              <circle
+                cx="330"
+                cy="276"
+                r="4.5"
+                class="led"
+                :class="{ on: playerState.isPlaying }"
+                :fill="playerState.isPlaying ? 'url(#wm-led-on)' : 'url(#wm-led-off)'"
+              />
+              <circle cx="328.6" cy="274.4" r="1.2" fill="#fff" fill-opacity="0.8" />
             </svg>
           </div>
 
@@ -470,11 +608,12 @@ onUnmounted(() => {
   gap: 0.25rem;
 }
 .icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 2.5rem;
   height: 2.5rem;
   padding: 0;
-  line-height: 1;
-  font-size: 1.6rem;
   border: none;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.08);
@@ -483,7 +622,6 @@ onUnmounted(() => {
 .icon-btn.small {
   width: 2.1rem;
   height: 2.1rem;
-  font-size: 0.95rem;
 }
 .icon-btn:hover {
   background: rgba(255, 255, 255, 0.18);
@@ -507,15 +645,10 @@ onUnmounted(() => {
   justify-content: center;
 }
 .walkman {
-  width: min(30rem, 40vw, 62vh);
+  display: block;
+  width: min(30rem, 40vw, 60vh);
   overflow: visible;
-  filter: drop-shadow(0 25px 40px rgba(0, 0, 0, 0.55));
-  animation: float 6s ease-in-out infinite;
-}
-@keyframes float {
-  50% {
-    transform: translateY(-8px);
-  }
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.35)) drop-shadow(0 30px 45px rgba(0, 0, 0, 0.55));
 }
 .key {
   cursor: pointer;
@@ -530,6 +663,10 @@ onUnmounted(() => {
   text-anchor: middle;
   fill: #3a3d44;
   pointer-events: none;
+}
+.key.pressed rect:first-of-type {
+  /* side face hides behind the body once pushed in */
+  opacity: 0;
 }
 .key.pressed text {
   fill: #1f7a46;
@@ -567,21 +704,19 @@ onUnmounted(() => {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 3px;
-  fill: rgba(0, 0, 0, 0.5);
+  fill: rgba(28, 30, 36, 0.72);
+}
+.brand.engrave {
+  fill: rgba(255, 255, 255, 0.4);
 }
 .led-label {
   font-size: 8px;
   font-weight: 700;
   letter-spacing: 1px;
-  fill: rgba(0, 0, 0, 0.5);
-}
-.led {
-  fill: #2f3a33;
-  transition: fill 0.3s ease;
+  fill: rgba(28, 30, 36, 0.72);
 }
 .led.on {
-  fill: #4dff88;
-  filter: drop-shadow(0 0 4px #4dff88);
+  filter: drop-shadow(0 0 3px #4dff88) drop-shadow(0 0 8px rgba(77, 255, 136, 0.6));
 }
 /* Track change: the old tape drops out, the new one slides in from above. */
 .tape-enter-active,
@@ -855,7 +990,7 @@ onUnmounted(() => {
     align-items: stretch;
   }
   .walkman {
-    width: min(86vw, 52vh);
+    width: min(86vw, 50vh);
   }
   .disc-side {
     align-items: center;
@@ -906,7 +1041,6 @@ onUnmounted(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .walkman,
   .reel,
   .bg-img {
     animation: none;
