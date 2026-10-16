@@ -13,10 +13,12 @@ import {
 } from "./subsonic/mappers";
 import * as browsing from "./subsonic/browsing";
 import * as media from "./subsonic/media";
+import * as folders from "./subsonic/folders";
 import * as q from "./db/queries";
 import { fetchLyrics, fetchStructuredLyrics } from "./lyrics";
 import { TelegramStorage } from "./storage/telegram";
-import { CachedStorage } from "./storage/cached";
+import { CachedStorage, cacheKey } from "./storage/cached";
+import * as cache from "./db/cache";
 import type { StorageBackend } from "./storage/types";
 
 const ERR = {
@@ -34,8 +36,7 @@ const DEFAULT_CACHE_MAX_BYTES = 8 * 1024 * 1024 * 1024;
 // web UI are held to this tighter limit, not the storage layer's looser one.
 const MAX_UPLOAD_TRACK_BYTES = 19 * 1024 * 1024;
 
-// Used for both uploadTrack's optional "folder" param (may have several
-// segments) and renameFolder's "name" param (must be a single segment).
+// uploadTrack's optional "folder" param (may have several segments).
 function sanitizeFolderPath(input: string): string {
   return input
     .split("/")
@@ -83,7 +84,13 @@ export default {
     let endpoint = url.pathname.slice("/rest/".length);
     if (endpoint.endsWith(".view")) endpoint = endpoint.slice(0, -".view".length);
 
-    const params = url.searchParams;
+    // POSTed form fields count as params too (OpenSubsonic "formPost"): the
+    // web UI's multi-select actions send hundreds of ids, more than fits in a
+    // URL. Other POST bodies (uploadTrack's raw file) are left alone.
+    const params = new URLSearchParams(url.search);
+    if (request.method === "POST" && request.headers.get("Content-Type")?.startsWith("application/x-www-form-urlencoded")) {
+      for (const [key, value] of new URLSearchParams(await request.text())) params.append(key, value);
+    }
     const format = params.get("f");
 
     const auth = await authenticate(env, params);
@@ -212,7 +219,7 @@ export default {
       case "download": {
         const id = params.get("id");
         if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
-        return media.streamTrack(env.DB, storage, id, request.headers.get("Range"));
+        return media.streamTrack(env.DB, storage, id, request.headers.get("Range"), endpoint === "download");
       }
 
       case "getCoverArt": {
@@ -482,7 +489,11 @@ export default {
 
       case "getOpenSubsonicExtensions":
         return respond(
-          openSubsonicExtensionsResponse([node("openSubsonicExtensions", { name: "songLyrics" }, { lists: { versions: [node("versions", undefined, { text: "1" })] } })]),
+          openSubsonicExtensionsResponse(
+            ["songLyrics", "formPost"].map((name) =>
+              node("openSubsonicExtensions", { name }, { lists: { versions: [node("versions", undefined, { text: "1" })] } }),
+            ),
+          ),
           format,
         );
 
@@ -606,41 +617,15 @@ export default {
         );
       }
 
+      // --- Folders view (file manager). Logic lives in src/subsonic/folders.ts.
+
       case "getFolder": {
         const path = params.get("path") ?? "";
-        const [rows, explicitFolders, starred] = await Promise.all([
-          q.listTracksUnderPath(env.DB, path),
-          q.listFoldersUnderPath(env.DB, path),
+        const [subfolders, tracks, starred] = await Promise.all([
+          folders.listSubfolders(env.DB, path),
+          q.listTracksInDir(env.DB, path),
           q.getStarredIds(env.DB, auth.username),
         ]);
-        const prefixLen = path ? path.length + 1 : 0;
-        const dirs = new Set<string>();
-        // A dir name lands here whenever something under it goes deeper than
-        // just that one segment — a track anywhere inside it, or a nested
-        // folder registration — meaning deleteFolder would refuse it. Used
-        // so the client only offers deleting a folder that's actually empty.
-        const nonEmptyDirs = new Set<string>();
-        const tracks: typeof rows = [];
-        for (const row of rows) {
-          const rest = (row.source_path ?? "").slice(prefixLen);
-          const slashIdx = rest.indexOf("/");
-          if (slashIdx === -1) tracks.push(row);
-          else {
-            const name = rest.slice(0, slashIdx);
-            dirs.add(name);
-            nonEmptyDirs.add(name);
-          }
-        }
-        // Merge in folders that were explicitly created empty (see
-        // db/schema.sql) — same "just take the next path segment" logic,
-        // just against folders.path instead of a track's source_path.
-        for (const { path: folderPath } of explicitFolders) {
-          const rest = folderPath.slice(prefixLen);
-          const slashIdx = rest.indexOf("/");
-          const name = slashIdx === -1 ? rest : rest.slice(0, slashIdx);
-          dirs.add(name);
-          if (slashIdx !== -1) nonEmptyDirs.add(name);
-        }
         return respond(
           subsonicSuccess(
             node(
@@ -648,13 +633,37 @@ export default {
               { path },
               {
                 lists: {
-                  dir: [...dirs]
-                    .sort((a, b) => a.localeCompare(b))
-                    .map((name) => node("dir", { name, empty: !nonEmptyDirs.has(name) })),
+                  dir: subfolders.map((d) => node("dir", { ...d })),
                   song: tracks.map((t) => songNode(t, { starredAt: starred.tracks.get(t.id) })),
                 },
               },
             ),
+          ),
+          format,
+        );
+      }
+
+      case "getFolderTree": {
+        const { root, folders: tree } = await folders.folderTree(env.DB);
+        return respond(
+          subsonicSuccess(node("folderTree", { ...root }, { lists: { folder: tree.map((f) => node("folder", { ...f })) } })),
+          format,
+        );
+      }
+
+      // Everything under a folder (subfolders included) in path order, or
+      // just what matches `query` — "play this folder" and in-folder search.
+      case "getFolderSongs": {
+        const size = Math.min(Number(params.get("size") ?? 500), 500);
+        const [tracks, starred] = await Promise.all([
+          q.listTracksUnderPath(env.DB, params.get("path") ?? "", { query: params.get("query") || undefined, limit: size }),
+          q.getStarredIds(env.DB, auth.username),
+        ]);
+        return respond(
+          subsonicSuccess(
+            node("folderSongs", undefined, {
+              lists: { song: tracks.map((t) => songNode(t, { starredAt: starred.tracks.get(t.id) })) },
+            }),
           ),
           format,
         );
@@ -727,28 +736,84 @@ export default {
       case "deleteTrack": {
         const id = params.get("id");
         if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
-        const result = await q.deleteTrackCascade(env.DB, id);
-        if (!result) return respond(subsonicError(ERR.NOT_FOUND, "Song not found"), format);
-        try {
-          await storage.deleteFile(result.fileRef);
-        } catch (err) {
-          console.warn(`Failed to delete Telegram message for track ${id}: ${err}`);
-        }
+        const { deleted } = await folders.deleteItems(env.DB, storage, [id], []);
+        if (!deleted) return respond(subsonicError(ERR.NOT_FOUND, "Song not found"), format);
         return respond(subsonicSuccess(), format);
+      }
+
+      // Multi-select delete: any mix of tracks (id) and whole folders (path,
+      // recursively). Permanent, Telegram messages included.
+      case "deleteItems": {
+        const { deleted } = await folders.deleteItems(env.DB, storage, params.getAll("id"), params.getAll("path"));
+        return respond(subsonicSuccess(node("deleteResult", { deleted })), format);
+      }
+
+      case "moveItems": {
+        const policy = params.get("onConflict") ?? "ask";
+        if (policy !== "ask" && policy !== "rename" && policy !== "skip") {
+          return respond(subsonicError(0, "onConflict must be ask, rename or skip"), format);
+        }
+        const result = await folders.moveItems(
+          env.DB,
+          params.getAll("id"),
+          params.getAll("path"),
+          params.get("dest") ?? "",
+          policy,
+        );
+        return respond(
+          subsonicSuccess(
+            node(
+              "moveResult",
+              { moved: result.moved, skipped: result.skipped },
+              { lists: { conflict: result.conflicts.map((name) => node("conflict", { name })) } },
+            ),
+          ),
+          format,
+        );
+      }
+
+      case "renameTrackFile": {
+        const id = params.get("id");
+        const name = params.get("name");
+        if (!id || !name) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id or name"), format);
+        await folders.renameTrackFile(env.DB, id, name);
+        return respond(subsonicSuccess(songNode((await q.getTrack(env.DB, id))!)), format);
+      }
+
+      // Where a track physically lives, for the Folders view's properties
+      // panel: its Telegram message (and a t.me link to it when the channel
+      // id has a linkable form) and whether it's in the R2 cache.
+      case "getTrackStorage": {
+        const id = params.get("id");
+        if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
+        const track = await q.getTrack(env.DB, id);
+        if (!track) return respond(subsonicError(ERR.NOT_FOUND, "Song not found"), format);
+        const { messageId } = JSON.parse(track.file_ref) as { messageId: number };
+        const channel = env.TG_CHANNEL_ID;
+        const link = channel.startsWith("-100")
+          ? `https://t.me/c/${channel.slice(4)}/${messageId}`
+          : channel.startsWith("@")
+            ? `https://t.me/${channel.slice(1)}/${messageId}`
+            : undefined;
+        const cached = env.CACHE_BUCKET
+          ? !!(await cache.getCacheEntry(env.DB, await cacheKey(track.file_ref)))
+          : undefined;
+        return respond(subsonicSuccess(node("trackStorage", { messageId, link, cached })), format);
       }
 
       case "createFolder": {
         const parentPath = params.get("path") ?? "";
         const name = params.get("name");
         if (!name) return respond(subsonicError(ERR.MISSING_PARAM, "Missing name"), format);
-        if (name.includes("/") || name === "." || name === "..") {
-          return respond(subsonicError(0, "Invalid folder name"), format);
+        const fullPath = folders.joinPath(parentPath, folders.validateName(name));
+        if (await q.folderExists(env.DB, fullPath)) {
+          return respond(subsonicError(0, `"${name.trim()}" already exists in this folder`), format);
         }
-        const fullPath = parentPath ? `${parentPath}/${name}` : name;
         await q.createFolder(env.DB, fullPath);
         return respond(subsonicSuccess(node("folder", { path: fullPath })), format);
       }
 
+      // Only ever deletes an empty folder; deleteItems is the recursive one.
       case "deleteFolder": {
         const path = params.get("path");
         if (!path) return respond(subsonicError(ERR.MISSING_PARAM, "Missing path"), format);
@@ -762,13 +827,7 @@ export default {
         const path = params.get("path");
         const name = params.get("name");
         if (!path || !name) return respond(subsonicError(ERR.MISSING_PARAM, "Missing path or name"), format);
-        if (name.includes("/") || name === "." || name === "..") {
-          return respond(subsonicError(0, "Invalid folder name"), format);
-        }
-        const parentPrefix = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
-        const newPath = parentPrefix ? `${parentPrefix}/${name}` : name;
-        const count = await q.renameFolder(env.DB, path, newPath);
-        if (count === 0) return respond(subsonicError(ERR.NOT_FOUND, "Folder not found"), format);
+        const newPath = await folders.renameFolder(env.DB, path, name);
         return respond(subsonicSuccess(node("folder", { path: newPath })), format);
       }
 
@@ -776,6 +835,7 @@ export default {
         return respond(subsonicError(0, `Unsupported endpoint: ${endpoint}`), format);
       }
     } catch (err) {
+      if (err instanceof folders.FolderError) return respond(subsonicError(err.code, err.message), format);
       // Surface the real D1/storage error as a Subsonic error response
       // instead of letting it propagate as an uncaught exception — Workers
       // then returns a bare, non-JSON 500 that every client (this web UI,

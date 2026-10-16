@@ -212,27 +212,32 @@ export function prev(): void {
 
 // --- queue editing (queue panel, "Play next"/"Add to queue" on track rows) ---
 
-// Both start playback when nothing is queued yet, rather than silently
-// building a queue the user can't see playing.
-export function playNext(song: Song): void {
-  if (state.queue.length === 0) return playQueue([song]);
+// Both take one song or several (the Folders view's multi-select), and
+// start playback when nothing is queued yet, rather than silently building
+// a queue the user can't see playing.
+export function playNext(songs: Song | Song[]): void {
+  const added = Array.isArray(songs) ? songs : [songs];
+  if (added.length === 0) return;
+  if (state.queue.length === 0) return playQueue(added);
   const current = state.queue[state.currentIndex];
-  state.queue = [...state.queue.slice(0, state.currentIndex + 1), song, ...state.queue.slice(state.currentIndex + 1)];
+  state.queue = [...state.queue.slice(0, state.currentIndex + 1), ...added, ...state.queue.slice(state.currentIndex + 1)];
   if (state.shuffle) {
     // Mirror the insert into the unshuffled order too, after the same
     // track, so it's still "next" if shuffle gets turned off.
     const at = state.originalQueue.indexOf(current) + 1;
-    state.originalQueue = [...state.originalQueue.slice(0, at), song, ...state.originalQueue.slice(at)];
+    state.originalQueue = [...state.originalQueue.slice(0, at), ...added, ...state.originalQueue.slice(at)];
   } else {
     state.originalQueue = state.queue;
   }
   persistQueue();
 }
 
-export function addToQueue(song: Song): void {
-  if (state.queue.length === 0) return playQueue([song]);
-  state.queue = [...state.queue, song];
-  state.originalQueue = state.shuffle ? [...state.originalQueue, song] : state.queue;
+export function addToQueue(songs: Song | Song[]): void {
+  const added = Array.isArray(songs) ? songs : [songs];
+  if (added.length === 0) return;
+  if (state.queue.length === 0) return playQueue(added);
+  state.queue = [...state.queue, ...added];
+  state.originalQueue = state.shuffle ? [...state.originalQueue, ...added] : state.queue;
   persistQueue();
 }
 

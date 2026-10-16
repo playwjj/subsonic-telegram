@@ -7,6 +7,8 @@ export interface StorageBackend {
   putFile(bytes: Uint8Array, filename: string, mimeType: string): Promise<string>;
   getFileResponse(ref: string, rangeHeader: string | null, contentType?: string): Promise<Response>;
   deleteFile(ref: string): Promise<void>;
+  // Bulk version of deleteFile for folder/multi-select deletes.
+  deleteFiles(refs: string[]): Promise<void>;
 }
 
 // A backend that can also hand back a whole file's raw bytes in one shot.

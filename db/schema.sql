@@ -40,16 +40,28 @@ CREATE TABLE IF NOT EXISTS tracks (
   play_count   INTEGER NOT NULL DEFAULT 0,
   last_played  INTEGER,         -- unix seconds, set by the scrobble endpoint
   rating       INTEGER NOT NULL DEFAULT 0, -- 0-5 stars, set by the setRating endpoint; 0 = unrated
-  cover_ref    TEXT             -- JSON: telegram file ref for a song-specific cover, or NULL.
+  cover_ref    TEXT,            -- JSON: telegram file ref for a song-specific cover, or NULL.
                                  -- Only set for tracks whose album is really a compilation of
                                  -- unrelated songs (see scripts/fix-covers.ts) -- otherwise the
                                  -- track just falls back to its album's cover_ref (see
                                  -- src/subsonic/mappers.ts songNode / src/subsonic/media.ts).
+  -- Parent folder of source_path ("a/b" for "a/b/c.mp3", "" for a file at the
+  -- root, NULL when source_path is NULL). The inner rtrim strips every
+  -- trailing non-"/" character (i.e. the file name), the outer one the "/".
+  -- Lets the Folders view list one directory via an index instead of
+  -- scanning everything under it (see getFolder in src/index.ts).
+  dir          TEXT GENERATED ALWAYS AS (rtrim(rtrim(source_path, replace(source_path, '/', '')), '/')) VIRTUAL
 );
+-- Existing databases created before dir existed need, once (before running
+-- the rest of this file, since idx_tracks_dir below depends on it):
+--   ALTER TABLE tracks ADD COLUMN dir TEXT GENERATED ALWAYS AS (rtrim(rtrim(source_path, replace(source_path, '/', '')), '/')) VIRTUAL;
 CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album_id);
 CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist_id);
 CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks(title);
 CREATE INDEX IF NOT EXISTS idx_tracks_source_path ON tracks(source_path);
+-- Covering index: getFolder/getFolderTree aggregate per-folder counts/sizes
+-- straight from it without touching the table rows.
+CREATE INDEX IF NOT EXISTS idx_tracks_dir ON tracks(dir, size, duration);
 
 -- owner is the single AUTH_USERNAME (see wrangler secrets), not a DB-managed
 -- account, so it's a plain string rather than a users(username) FK.

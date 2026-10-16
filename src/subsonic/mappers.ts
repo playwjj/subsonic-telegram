@@ -64,6 +64,8 @@ export function songNode(t: TrackRow, opts?: { starredAt?: number }): SNode {
     played: t.last_played ? isoDate(t.last_played) : undefined,
     starred: opts?.starredAt ? isoDate(opts.starredAt) : undefined,
     userRating: t.rating || undefined,
+    path: t.source_path ?? undefined,
+    created: isoDate(t.created_at),
     type: "music",
   });
 }

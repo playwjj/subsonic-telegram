@@ -39,6 +39,14 @@ export async function deleteCacheEntry(db: D1Database, key: string): Promise<voi
   await db.prepare(`DELETE FROM cache_entries WHERE key = ?`).bind(key).run();
 }
 
+export async function deleteCacheEntries(db: D1Database, keys: string[]): Promise<void> {
+  if (!keys.length) return;
+  await db
+    .prepare(`DELETE FROM cache_entries WHERE key IN (SELECT value FROM json_each(?))`)
+    .bind(JSON.stringify(keys))
+    .run();
+}
+
 export async function getTotalCacheBytes(db: D1Database): Promise<number> {
   const row = await db
     .prepare(`SELECT COALESCE(SUM(size), 0) as total FROM cache_entries`)

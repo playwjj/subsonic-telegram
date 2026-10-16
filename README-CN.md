@@ -235,13 +235,13 @@ npm run fix-covers -- --artist-photos [--limit=N] [--dry-run] [--retry-failed]
 
 ## Web UI
 
-`web/` 是一个 Vue 3 + Vite 单页应用，直接调 `/rest/*` API（跟第三方 Subsonic 客户端走的是同一套接口），提供浏览歌库、播放、管理 playlist 的界面，另外还支持在浏览器里逐首上传/删除歌曲、创建/改名/删除文件夹（批量导入还是交给上面的 CLI 脚本），细节见下面的[从 Web UI 管理歌库](#从-web-ui-管理歌库)。
+`web/` 是一个 Vue 3 + Vite 单页应用，直接调 `/rest/*` API（跟第三方 Subsonic 客户端走的是同一套接口），提供浏览歌库、播放、管理 playlist 的界面，另外 Folders 页面是一个网盘式的文件管理器（多选、移动、重命名、递归删除），并支持在浏览器里逐首上传（批量导入还是交给上面的 CLI 脚本），细节见下面的[从 Web UI 管理歌库](#从-web-ui-管理歌库)。
 
 **页面**：Home（库统计 + 最近新增/最近播放/最多播放）、Artists（按 ID3 艺人/专辑浏览）、Songs（扁平化全曲目列表，支持排序分页）、Folders（按导入时的本地文件夹结构浏览，见下）、Favorites（通过 `getStarred2` 列出收藏的歌曲/专辑/艺人，可全部播放或随机播放）、Search、Playlists。
 
 **播放器**：支持随机播放（播放条上的 🔀 是对当前队列的开关；各处的「🔀 Shuffle」按钮则直接打乱一组歌开始播——专辑、歌单（详情页和歌单列表的每一行）、艺人、文件夹（含子文件夹）、收藏、Songs 页（「Shuffle all」，整个曲库），以及首页 Random Songs 旁边的「Shuffle library」。艺人/文件夹/整个曲库这几个通过本项目自己的 `getShuffleSongs` 接口均匀随机抽最多 500 首；关掉随机会恢复原顺序）、循环（关/列表/单曲）和音量调节（随机/循环/音量设置存在 `localStorage`）。播放队列会通过 `savePlayQueue` 同步到服务端，打开页面时用 `getPlayQueue` 恢复到上次的歌和进度（暂停状态），刷新页面或者从别的 Subsonic 客户端过来都能续播；因为所有 id 都要拼进 URL 查询参数，只保存当前曲目前后共 200 首的窗口。手机上（≤600px）播放条会分成两行——封面/歌名/播放控制一行，进度条和歌词/队列按钮一行——并隐藏星级评分和音量条。锁屏/通知栏控制和键盘媒体键走的是 Media Session API。播放条上的 ☰ 打开播放队列（点任意一首跳过去播、移除单首或清空队列）；每一行歌曲的 ⋯ 菜单里有「Play next」（下一首播放）和「Add to queue」（加到队列末尾）。
 
-**Folders 是什么**：按 `source_path`（`npm run import` 记录的、相对导入根目录的路径）还原出原始文件夹树，跟 Artists 那种按 ID3 标签分组的浏览方式并列存在。对那些"合集"文件夹（比如按月份存的热歌榜）特别有用——这类文件夹里每首歌的 ID3 艺人标签都不一样，按 Artists 浏览会被打散到几十上百个艺人名下，按 Folders 浏览则完全保留原来"一个文件夹一份合集"的样子。对应的后端接口是 `getFolder`（`src/index.ts`），跟 `getLibraryStats`/`getSongs`/`getRecentlyPlayed`/`getMostPlayed` 一样，都不是 Subsonic 官方协议的一部分，只服务于这个项目自己的 Web UI。
+**Folders 是什么**：按 `source_path`（`npm run import` 记录的、相对导入根目录的路径）还原出原始文件夹树，跟 Artists 那种按 ID3 标签分组的浏览方式并列存在。对那些"合集"文件夹（比如按月份存的热歌榜）特别有用——这类文件夹里每首歌的 ID3 艺人标签都不一样，按 Artists 浏览会被打散到几十上百个艺人名下，按 Folders 浏览则完全保留原来"一个文件夹一份合集"的样子。对应的后端接口是 `getFolder`、`getFolderTree`、`getFolderSongs`、`moveItems`、`renameTrackFile`、`deleteItems`、`getTrackStorage` 等（逻辑在 `src/subsonic/folders.ts`），跟 `getLibraryStats`/`getSongs`/`getRecentlyPlayed`/`getMostPlayed` 一样，都不是 Subsonic 官方协议的一部分，只服务于这个项目自己的 Web UI。
 
 ### 从 Web UI 管理歌库
 
@@ -250,10 +250,26 @@ Upload 页面（导航栏里的 Upload）和任意 Folders 页面点"⬆ Upload 
 - 跟 `npm run import` 一样是 19MB 上限（Telegram `getFile` 的下载限制）——超过这个大小的文件即使传上去了也永远放不回来，所以前端和后端都会拒绝。
 - 可选的"Folder"字段（比如 `80s/Rock`）会设置 `source_path`，这样这首歌也会出现在 Folders 视图里——留空的话就只出现在 Artists/Songs 里，不会出现在 Folders。
 - 这个表单不处理封面——用它建的新专辑就是没有封面，跟任何 `cover_ref` 为空的专辑一样。
-- **删除歌曲**（Songs/Album/Folders 列表行上的 🗑 按钮——playlist 和搜索结果视图没有这个按钮，它们各自已经有语义不同的"从歌单移除"/什么都没有）会把这首歌从 D1 永久删除（顺带清理它在 playlist、收藏里的引用，如果这是所在专辑/艺人的最后一首歌，专辑/艺人也会一并删除），并尽力删除对应的 Telegram 消息（见上面「删除消息」bot 权限那条说明）。
-- **文件夹改名**（子文件夹旁边的 ✎ 按钮，或者当前文件夹自己面包屑那一段旁边的 ✎ 按钮）只改这一段路径本身——会更新受影响的每条 track 在 D1 里的 `source_path`，不涉及 Telegram 那边。
-- **创建空文件夹**（任意 Folders 页面里的"+ New folder"）会在一张小的 `folders` 表里登记一个路径——文件夹本来完全是从 track 的 `source_path` 推算出来的，这是唯一能让一个文件夹在还没传任何歌进去之前就存在的办法。`getFolder` 会把这两个来源合并展示。
-- **删除文件夹**（只有 `getFolder` 判断为真的空文件夹，子文件夹旁边才会出现 🗑；当前文件夹自己不再有任何内容时，面包屑旁边也会出现）只会删掉这条 `folders` 登记——如果里面还有歌或者还有嵌套的子文件夹，会被拒绝并提示"Folder is not empty"，所以这个操作永远不会顺带删掉歌曲。想删歌请先用歌曲那边的删除按钮。
+- **删除歌曲**（Songs/Album 列表行上的 🗑 按钮——playlist 和搜索结果视图没有这个按钮，它们各自已经有语义不同的"从歌单移除"/什么都没有）会把这首歌从 D1 永久删除（顺带清理它在 playlist、收藏里的引用，如果这是所在专辑/艺人的最后一首歌，专辑/艺人也会一并删除），并尽力删除对应的 Telegram 消息（见上面「删除消息」bot 权限那条说明）。
+
+**Folders 页面是一个网盘式的文件管理器**：
+
+- **布局**：左侧文件夹树（窄于 1024px 时隐藏）、面包屑、可排序的列表（名称/标题·艺人/时长/大小/添加时间；文件夹永远排在前面，并显示其下全部歌曲的数量、大小和总时长），也可以切换成封面网格。「Search in this folder…」会搜索当前文件夹及其所有子文件夹，并标出每条结果所在的子文件夹。
+- **选择**：单击一行选中它，Ctrl/⌘+单击增减，Shift+单击连选，也可以用复选框。触屏上长按一行开始多选。单击名称（或双击行）打开文件夹/播放歌曲。
+- **操作**：右键菜单、每行的 ⋯ 按钮，或者选中后出现的操作栏：播放 / 下一首播放 / 加入队列 / 加到歌单（文件夹算作它下面的全部歌曲，每个文件夹最多 500 首）、移动到…、重命名、下载（仅歌曲，用真实文件名保存）、属性（标签、格式、播放次数、所在的 Telegram 消息、是否在 R2 缓存里）、删除。
+- **键盘**：Delete（或 ⌘/Ctrl+Backspace）删除，F2 重命名，Enter 打开/播放，Backspace 返回上级，Ctrl/⌘+A 全选，↑/↓ 移动选择，Esc 取消选择。
+- **移动**：「移动到…」从文件夹树里选目标；也可以把选中项直接拖到某个文件夹行、左侧树或面包屑上。文件夹会连同里面的所有内容一起移动。目标位置有重名时，会问你是「两个都保留」（移过去的改名为 `name (1).mp3`）还是「跳过这些」。把东西全部移走或删光之后，原来的文件夹会以空文件夹的形式保留，而不是消失。
+- **重命名**文件只改文件名（`source_path` 的最后一段），不改标题标签；文件夹改名时如果新名字已被占用会直接拒绝，而不是悄悄合并两个文件夹。两者都不涉及 Telegram。
+- **删除**支持歌曲和文件夹混选、递归删除，确认框会显示总共多少首、多大。删除是永久的：歌曲从 D1 删除的方式跟上面的单曲删除一样，Telegram 消息用 `deleteMessages` 批量删除（每次 100 条）。
+- 「+ New folder」会在一张小的 `folders` 表里登记一个路径——文件夹本来完全是从 track 的 `source_path` 推算出来的，这是让一个文件夹在没有内容时也能存在的办法。列表会合并这两个来源。
+
+文件夹列表通过 `dir` 列（`source_path` 的父路径，一个生成列，见 `db/schema.sql`）上的索引直接读出每个文件夹的统计，不再把文件夹下的所有歌曲都查出来；所有前缀匹配都改用 `[prefix + "/", prefix + "0")` 区间而不是 `LIKE`，所以文件夹名里的 `_`/`%` 会按字面匹配。多选操作把 id 列表放在 POST 表单里发送（OpenSubsonic 的 `formPost` 扩展，任何客户端都能用），因为几百个 id 放不进 URL。
+
+**升级已有数据库**（在 `dir` 列出现之前建的库）需要在部署前执行一次下面的命令，然后照常跑 `npm run db:migrate:remote` 建索引：
+
+```bash
+wrangler d1 execute subsonic-telegram --remote --command "ALTER TABLE tracks ADD COLUMN dir TEXT GENERATED ALWAYS AS (rtrim(rtrim(source_path, replace(source_path, '/', '')), '/')) VIRTUAL"
+```
 
 **样式**：Tailwind CSS v4（通过 `@tailwindcss/vite`，不需要单独的 `postcss.config.js`），单一深色主题，手写 `.glass` 毛玻璃卡片 + 固定定位的模糊渐变"极光"背景块，没有做明暗双主题切换。
 

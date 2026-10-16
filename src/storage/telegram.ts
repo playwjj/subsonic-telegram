@@ -11,6 +11,9 @@ interface TelegramRef {
 // exceeds that, putFile() throws and the caller (import script) skips it.
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
+// Bot API's deleteMessages takes at most this many message ids per call.
+const MAX_DELETE_BATCH = 100;
+
 export class TelegramStorage implements StorageBackend {
   constructor(
     private botToken: string,
@@ -104,5 +107,23 @@ export class TelegramStorage implements StorageBackend {
     if (!data.ok) {
       throw new Error(`Telegram deleteMessage failed: ${JSON.stringify(data)}`);
     }
+  }
+
+  // Same permission requirement and failure tolerance as deleteFile, but
+  // through deleteMessages so deleting a whole folder costs one Telegram
+  // call per 100 files rather than one per file (Workers cap subrequests).
+  async deleteFiles(refStrs: string[]): Promise<void> {
+    const messageIds = refStrs.map((r) => (JSON.parse(r) as TelegramRef).messageId);
+    const failures: string[] = [];
+    for (let i = 0; i < messageIds.length; i += MAX_DELETE_BATCH) {
+      const res = await fetch(this.api("deleteMessages"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: this.channelId, message_ids: messageIds.slice(i, i + MAX_DELETE_BATCH) }),
+      });
+      const data = (await res.json()) as any;
+      if (!data.ok) failures.push(JSON.stringify(data));
+    }
+    if (failures.length) throw new Error(`Telegram deleteMessages failed: ${failures.join("; ")}`);
   }
 }

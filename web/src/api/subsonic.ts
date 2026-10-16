@@ -40,12 +40,7 @@ function buildUrl(endpoint: string, params: Params = {}, creds?: { username: str
   return `/rest/${endpoint}.view?${search.toString()}`;
 }
 
-async function call<T>(
-  endpoint: string,
-  params?: Params,
-  creds?: { username: string; password: string },
-): Promise<T> {
-  const res = await fetch(buildUrl(endpoint, params, creds));
+async function parseResponse<T>(res: Response): Promise<T> {
   const data = (await res.json()) as { "subsonic-response": any };
   const body = data["subsonic-response"];
   if (body.status !== "ok") {
@@ -54,8 +49,33 @@ async function call<T>(
   return body as T;
 }
 
+async function call<T>(
+  endpoint: string,
+  params?: Params,
+  creds?: { username: string; password: string },
+): Promise<T> {
+  return parseResponse<T>(await fetch(buildUrl(endpoint, params, creds)));
+}
+
+// Same as call(), but with the params sent as a form body (the Worker's
+// "formPost" support) — for multi-select actions whose id lists wouldn't
+// fit in a URL.
+async function callPost<T>(endpoint: string, params: Params): Promise<T> {
+  const res = await fetch(`/rest/${endpoint}.view`, {
+    method: "POST",
+    body: buildSearch(params, getCredentials()),
+  });
+  return parseResponse<T>(res);
+}
+
 export function streamUrl(id: string): string {
   return buildUrl("stream", { id });
+}
+
+// Saves under the track's real file name (the Worker sets
+// Content-Disposition on `download`, unlike `stream`).
+export function downloadUrl(id: string): string {
+  return buildUrl("download", { id });
 }
 
 export function coverArtUrl(id: string): string {
@@ -118,6 +138,12 @@ export interface Song {
   type: string;
   starred?: string;
   userRating?: number;
+  // Folder path + file name (tracks.source_path); absent for a song that
+  // was uploaded without a folder.
+  path?: string;
+  created?: string;
+  playCount?: number;
+  played?: string;
 }
 
 export interface ArtistDetail extends Artist {
@@ -316,10 +342,15 @@ export async function getLyrics(artist: string, title: string): Promise<Lyrics> 
   return body.lyrics;
 }
 
-export interface FolderDir {
+export interface FolderStats {
+  songCount: number;
+  size: number;
+  duration: number;
+}
+
+export interface FolderDir extends FolderStats {
   name: string;
-  // Whether deleteFolder would actually succeed on this one — see getFolder
-  // in src/index.ts. Has nothing under it (no tracks, no nested folder).
+  // Nothing under it at all (no tracks, no nested folder).
   empty: boolean;
 }
 
@@ -338,6 +369,74 @@ export async function getFolder(path: string): Promise<FolderListing> {
     dirs: body.folder.dir ?? [],
     songs: body.folder.song ?? [],
   };
+}
+
+export interface TreeFolder extends FolderStats {
+  path: string;
+}
+
+export async function getFolderTree(): Promise<{ root: FolderStats; folders: TreeFolder[] }> {
+  const body = await call<{ folderTree: FolderStats & { folder?: TreeFolder[] } }>("getFolderTree");
+  const { folder, ...root } = body.folderTree;
+  return { root, folders: folder ?? [] };
+}
+
+// Everything under `path` (subfolders included, max 500) in path order, or
+// only the songs matching `query`.
+export async function getFolderSongs(path: string, query?: string): Promise<Song[]> {
+  const body = await call<{ folderSongs: { song?: Song[] } }>("getFolderSongs", { path, query, size: 500 });
+  return body.folderSongs.song ?? [];
+}
+
+export type ConflictPolicy = "ask" | "rename" | "skip";
+
+export interface MoveResult {
+  moved: number;
+  skipped: number;
+  // Names already taken in the destination. With "ask", nothing was moved
+  // if this is non-empty.
+  conflicts: string[];
+}
+
+export async function moveItems(opts: {
+  songIds: string[];
+  folderPaths: string[];
+  dest: string;
+  onConflict: ConflictPolicy;
+}): Promise<MoveResult> {
+  const body = await callPost<{ moveResult: { moved: number; skipped: number; conflict?: { name: string }[] } }>(
+    "moveItems",
+    { id: opts.songIds, path: opts.folderPaths, dest: opts.dest, onConflict: opts.onConflict },
+  );
+  const r = body.moveResult;
+  return { moved: r.moved, skipped: r.skipped, conflicts: (r.conflict ?? []).map((c) => c.name) };
+}
+
+// Permanent: songs and whole folders (recursively), Telegram files included.
+export async function deleteItems(opts: { songIds: string[]; folderPaths: string[] }): Promise<number> {
+  const body = await callPost<{ deleteResult: { deleted: number } }>("deleteItems", {
+    id: opts.songIds,
+    path: opts.folderPaths,
+  });
+  return body.deleteResult.deleted;
+}
+
+// Renames the file (last segment of the song's path), not its title tag.
+export async function renameTrackFile(id: string, name: string): Promise<Song> {
+  const body = await callPost<{ song: Song }>("renameTrackFile", { id, name });
+  return body.song;
+}
+
+export interface TrackStorage {
+  messageId: number;
+  link?: string;
+  // Undefined when the R2 cache isn't enabled at all.
+  cached?: boolean;
+}
+
+export async function getTrackStorage(id: string): Promise<TrackStorage> {
+  const body = await call<{ trackStorage: TrackStorage }>("getTrackStorage", { id });
+  return body.trackStorage;
 }
 
 // Same 19MB cap the Worker enforces (Telegram's getFile download limit) —
@@ -402,8 +501,4 @@ export async function renameFolder(path: string, name: string): Promise<void> {
 
 export async function createFolder(parentPath: string, name: string): Promise<void> {
   await call("createFolder", { path: parentPath, name });
-}
-
-export async function deleteFolder(path: string): Promise<void> {
-  await call("deleteFolder", { path });
 }

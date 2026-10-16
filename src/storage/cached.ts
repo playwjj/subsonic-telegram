@@ -38,6 +38,19 @@ export class CachedStorage implements StorageBackend {
     );
   }
 
+  async deleteFiles(refs: string[]): Promise<void> {
+    await this.source.deleteFiles(refs);
+    const keys = await Promise.all(refs.map(cacheKey));
+    // R2's bulk delete takes up to 1000 keys per call.
+    const chunks: string[][] = [];
+    for (let i = 0; i < keys.length; i += 1000) chunks.push(keys.slice(i, i + 1000));
+    this.ctx.waitUntil(
+      Promise.all(chunks.map((chunk) => this.bucket.delete(chunk)))
+        .then(() => cache.deleteCacheEntries(this.db, keys))
+        .catch((err) => console.warn(`Cache cleanup failed for deleted files: ${err}`)),
+    );
+  }
+
   async getFileResponse(ref: string, rangeHeader: string | null, contentType?: string): Promise<Response> {
     const key = await cacheKey(ref);
     const entry = await cache.getCacheEntry(this.db, key);
@@ -109,7 +122,7 @@ export class CachedStorage implements StorageBackend {
   }
 }
 
-async function cacheKey(ref: string): Promise<string> {
+export async function cacheKey(ref: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ref));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }

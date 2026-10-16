@@ -6,10 +6,23 @@ export async function streamTrack(
   storage: StorageBackend,
   id: string,
   rangeHeader: string | null,
+  asAttachment = false,
 ): Promise<Response> {
   const track = await q.getTrack(db, id);
   if (!track) return new Response("Not found", { status: 404 });
-  return storage.getFileResponse(track.file_ref, rangeHeader, track.content_type);
+  const response = await storage.getFileResponse(track.file_ref, rangeHeader, track.content_type);
+  if (!asAttachment || !response.ok) return response;
+  // `download` saves under the track's real file name instead of the
+  // browser's guess ("download.view"). filename* (RFC 6266/5987) carries
+  // non-ASCII names; the plain filename is an ASCII fallback.
+  const name = track.source_path?.slice(track.source_path.lastIndexOf("/") + 1) ?? `${track.title}.${track.suffix}`;
+  const fallback = name.replace(/[^\x20-\x7e]|["\\]/g, "_");
+  const withName = new Response(response.body, response);
+  withName.headers.set(
+    "Content-Disposition",
+    `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+  );
+  return withName;
 }
 
 export async function getCoverArt(

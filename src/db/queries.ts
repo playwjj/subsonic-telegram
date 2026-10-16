@@ -44,6 +44,7 @@ export interface TrackRow {
   source_path: string | null;
   rating: number;
   cover_ref: string | null;
+  dir: string | null;
 }
 
 const ARTIST_SELECT = `
@@ -617,10 +618,10 @@ export async function getRandomTracksByGenreExcludingArtist(
 // that's since been deleted).
 export async function getTracksByIds(db: D1Database, ids: string[]): Promise<TrackRow[]> {
   if (!ids.length) return [];
-  const placeholders = ids.map(() => "?").join(",");
+  // One JSON param rather than one bind per id — D1 caps binds at 100.
   const { results } = await db
-    .prepare(`${TRACK_SELECT} WHERE t.id IN (${placeholders})`)
-    .bind(...ids)
+    .prepare(`${TRACK_SELECT} WHERE t.id IN (SELECT value FROM json_each(?))`)
+    .bind(JSON.stringify(ids))
     .all<TrackRow>();
   const byId = new Map(results.map((t) => [t.id, t]));
   return ids.map((id) => byId.get(id)).filter((t): t is TrackRow => !!t);
@@ -654,22 +655,107 @@ export async function savePlayQueue(
     .run();
 }
 
+// "Strictly under folder `prefix`" as a range on a path column: "/" is
+// 0x2F and "0" is 0x30, so [prefix + "/", prefix + "0") is exactly the set of
+// strings starting with prefix + "/". Unlike LIKE there are no wildcards to
+// escape (a folder named "a_b" no longer matches "axb/..."), it's
+// case-sensitive like a real path, and it can use the column's index. The
+// empty prefix (the root) means everything that has a path at all.
+export function underPrefix(column: string, prefix: string): { sql: string; binds: string[] } {
+  if (!prefix) return { sql: `${column} IS NOT NULL`, binds: [] };
+  return { sql: `(${column} >= ? AND ${column} < ?)`, binds: [`${prefix}/`, `${prefix}0`] };
+}
+
 export async function getRandomTracksUnderPath(db: D1Database, prefix: string, limit: number): Promise<TrackRow[]> {
-  const pattern = prefix ? `${prefix}/%` : "%";
+  const under = underPrefix("t.source_path", prefix);
   const { results } = await db
-    .prepare(`${TRACK_SELECT} WHERE t.source_path LIKE ? ORDER BY RANDOM() LIMIT ?`)
-    .bind(pattern, limit)
+    .prepare(`${TRACK_SELECT} WHERE ${under.sql} ORDER BY RANDOM() LIMIT ?`)
+    .bind(...under.binds, limit)
     .all<TrackRow>();
   return results;
 }
 
-export async function listTracksUnderPath(db: D1Database, prefix: string): Promise<TrackRow[]> {
-  const pattern = prefix ? `${prefix}/%` : "%";
+// Tracks directly inside one folder (not its subfolders) — "" is the root.
+export async function listTracksInDir(db: D1Database, dir: string): Promise<TrackRow[]> {
   const { results } = await db
-    .prepare(`${TRACK_SELECT} WHERE t.source_path LIKE ? ORDER BY t.source_path COLLATE NOCASE`)
-    .bind(pattern)
+    .prepare(`${TRACK_SELECT} WHERE t.dir = ? ORDER BY t.source_path COLLATE NOCASE`)
+    .bind(dir)
     .all<TrackRow>();
   return results;
+}
+
+// Tracks anywhere under a folder, in path order, optionally narrowed to ones
+// whose title/artist/album/file name (relative to the folder) contains
+// `query`. Backs the Folders view's "play folder" and in-folder search.
+export async function listTracksUnderPath(
+  db: D1Database,
+  prefix: string,
+  opts: { query?: string; limit?: number } = {},
+): Promise<TrackRow[]> {
+  const under = underPrefix("t.source_path", prefix);
+  const binds: (string | number)[] = [...under.binds];
+  let where = under.sql;
+  if (opts.query) {
+    // Escape LIKE's own wildcards so the query matches literally.
+    const pattern = `%${opts.query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const like = (expr: string) => `${expr} LIKE ? ESCAPE '\\'`;
+    where += ` AND (${like("t.title")} OR ${like("ar.name")} OR ${like("al.name")} OR ${like("substr(t.source_path, ?)")})`;
+    binds.push(pattern, pattern, pattern, prefix ? prefix.length + 2 : 1, pattern);
+  }
+  const { results } = await db
+    .prepare(`${TRACK_SELECT} WHERE ${where} ORDER BY t.source_path COLLATE NOCASE LIMIT ?`)
+    .bind(...binds, opts.limit ?? -1)
+    .all<TrackRow>();
+  return results;
+}
+
+export async function listTrackIdsUnderPath(db: D1Database, prefix: string): Promise<string[]> {
+  const under = underPrefix("source_path", prefix);
+  const { results } = await db
+    .prepare(`SELECT id FROM tracks WHERE ${under.sql}`)
+    .bind(...under.binds)
+    .all<{ id: string }>();
+  return results.map((r) => r.id);
+}
+
+export interface DirStatRow {
+  dir: string;
+  song_count: number;
+  size: number;
+  duration: number;
+}
+
+// Totals per directory for every directory at or below `prefix` that
+// directly holds tracks — read straight off idx_tracks_dir, without touching
+// the tracks themselves. Callers roll these up into parent folders (see
+// src/subsonic/folders.ts).
+export async function listDirStats(db: D1Database, prefix: string): Promise<DirStatRow[]> {
+  const under = underPrefix("dir", prefix);
+  const where = prefix ? `(dir = ? OR ${under.sql})` : "dir IS NOT NULL";
+  const { results } = await db
+    .prepare(
+      `SELECT dir, COUNT(*) as song_count, COALESCE(SUM(size), 0) as size, COALESCE(SUM(duration), 0) as duration
+       FROM tracks WHERE ${where} GROUP BY dir`,
+    )
+    .bind(...(prefix ? [prefix, ...under.binds] : []))
+    .all<DirStatRow>();
+  return results;
+}
+
+// Whether anything lives at `path`: a track under it, or an explicit
+// registration of it or something below it. The root always exists.
+export async function folderExists(db: D1Database, path: string): Promise<boolean> {
+  if (!path) return true;
+  const tracks = underPrefix("source_path", path);
+  const folders = underPrefix("path", path);
+  const row = await db
+    .prepare(
+      `SELECT EXISTS(SELECT 1 FROM tracks WHERE ${tracks.sql})
+           OR EXISTS(SELECT 1 FROM folders WHERE path = ? OR ${folders.sql}) as found`,
+    )
+    .bind(...tracks.binds, path, ...folders.binds)
+    .first<{ found: number }>();
+  return !!row?.found;
 }
 
 // --- Web UI upload / delete / folder rename ---
@@ -757,56 +843,54 @@ export async function insertTrack(db: D1Database, input: NewTrackInput): Promise
 
 export interface DeletedTrackInfo {
   fileRef: string;
+  sourcePath: string | null;
 }
 
 // db/schema.sql has no ON DELETE behavior at all, so playlist_tracks/starred
-// rows referencing this track (and an album/artist left with zero tracks)
-// have to be cleaned up by hand here.
-export async function deleteTrackCascade(db: D1Database, trackId: string): Promise<DeletedTrackInfo | null> {
-  const track = await db
-    .prepare(`SELECT file_ref, album_id, artist_id FROM tracks WHERE id = ?`)
-    .bind(trackId)
-    .first<{ file_ref: string; album_id: string; artist_id: string }>();
-  if (!track) return null;
+// rows referencing these tracks (and albums/artists left with nothing in
+// them) have to be cleaned up by hand here. Set-based, so the number of
+// statements stays the same whether this is one track or a whole folder
+// (D1 caps queries per Worker invocation); ids travel as one JSON array
+// param via json_each rather than one bind per id (D1 caps those at 100).
+export async function deleteTracksCascade(db: D1Database, trackIds: string[]): Promise<DeletedTrackInfo[]> {
+  if (!trackIds.length) return [];
+  const ids = JSON.stringify(trackIds);
+  const { results } = await db
+    .prepare(
+      `SELECT file_ref, source_path, album_id, artist_id FROM tracks WHERE id IN (SELECT value FROM json_each(?))`,
+    )
+    .bind(ids)
+    .all<{ file_ref: string; source_path: string | null; album_id: string; artist_id: string }>();
+  if (!results.length) return [];
 
+  const albumIds = JSON.stringify([...new Set(results.map((r) => r.album_id))]);
+  const artistIds = JSON.stringify([...new Set(results.map((r) => r.artist_id))]);
+  const emptyAlbums = `SELECT value FROM json_each(?) WHERE NOT EXISTS (SELECT 1 FROM tracks WHERE album_id = value)`;
+  const emptyArtists = `SELECT value FROM json_each(?) WHERE NOT EXISTS (SELECT 1 FROM albums WHERE artist_id = value)
+    AND NOT EXISTS (SELECT 1 FROM tracks WHERE artist_id = value)`;
+
+  // A batch runs as one transaction, in order — so the album/artist checks
+  // below already see the tracks gone.
   await db.batch([
-    db.prepare(`DELETE FROM playlist_tracks WHERE track_id = ?`).bind(trackId),
-    db.prepare(`DELETE FROM starred WHERE item_type = 'track' AND item_id = ?`).bind(trackId),
-    db.prepare(`DELETE FROM tracks WHERE id = ?`).bind(trackId),
+    db.prepare(`DELETE FROM playlist_tracks WHERE track_id IN (SELECT value FROM json_each(?))`).bind(ids),
+    db.prepare(`DELETE FROM starred WHERE item_type = 'track' AND item_id IN (SELECT value FROM json_each(?))`).bind(ids),
+    db.prepare(`DELETE FROM tracks WHERE id IN (SELECT value FROM json_each(?))`).bind(ids),
+    db.prepare(`DELETE FROM starred WHERE item_type = 'album' AND item_id IN (${emptyAlbums})`).bind(albumIds),
+    db.prepare(`DELETE FROM albums WHERE id IN (${emptyAlbums})`).bind(albumIds),
+    db.prepare(`DELETE FROM starred WHERE item_type = 'artist' AND item_id IN (${emptyArtists})`).bind(artistIds),
+    db.prepare(`DELETE FROM artists WHERE id IN (${emptyArtists})`).bind(artistIds),
   ]);
 
-  const remainingInAlbum = await db
-    .prepare(`SELECT COUNT(*) as c FROM tracks WHERE album_id = ?`)
-    .bind(track.album_id)
-    .first<{ c: number }>();
-  if (remainingInAlbum?.c === 0) {
-    await db.batch([
-      db.prepare(`DELETE FROM starred WHERE item_type = 'album' AND item_id = ?`).bind(track.album_id),
-      db.prepare(`DELETE FROM albums WHERE id = ?`).bind(track.album_id),
-    ]);
-
-    const remainingArtistAlbums = await db
-      .prepare(`SELECT COUNT(*) as c FROM albums WHERE artist_id = ?`)
-      .bind(track.artist_id)
-      .first<{ c: number }>();
-    if (remainingArtistAlbums?.c === 0) {
-      await db.batch([
-        db.prepare(`DELETE FROM starred WHERE item_type = 'artist' AND item_id = ?`).bind(track.artist_id),
-        db.prepare(`DELETE FROM artists WHERE id = ?`).bind(track.artist_id),
-      ]);
-    }
-  }
-
-  return { fileRef: track.file_ref };
+  return results.map((r) => ({ fileRef: r.file_ref, sourcePath: r.source_path }));
 }
 
-// Explicit empty-folder registrations — see db/schema.sql. getFolder merges
+// Explicit folder registrations — see db/schema.sql. getFolder merges
 // these with the folders it derives from tracks.source_path.
 export async function listFoldersUnderPath(db: D1Database, prefix: string): Promise<{ path: string }[]> {
-  const pattern = prefix ? `${prefix}/%` : "%";
+  const under = underPrefix("path", prefix);
   const { results } = await db
-    .prepare(`SELECT path FROM folders WHERE path LIKE ? ORDER BY path COLLATE NOCASE`)
-    .bind(pattern)
+    .prepare(`SELECT path FROM folders WHERE ${under.sql} ORDER BY path COLLATE NOCASE`)
+    .bind(...under.binds)
     .all<{ path: string }>();
   return results;
 }
@@ -818,15 +902,34 @@ export async function createFolder(db: D1Database, path: string): Promise<void> 
     .run();
 }
 
+// Registers each (non-root) path so it keeps showing up even once nothing
+// is left in it — what a file manager does when you move or delete the last
+// thing out of a folder.
+export function keepFoldersStatement(db: D1Database, paths: string[]): D1PreparedStatement | null {
+  const kept = [...new Set(paths.filter(Boolean))];
+  if (!kept.length) return null;
+  return db
+    .prepare(`INSERT INTO folders (path, created_at) SELECT value, ? FROM json_each(?) WHERE true ON CONFLICT(path) DO NOTHING`)
+    .bind(Math.floor(Date.now() / 1000), JSON.stringify(kept));
+}
+
+// Drops the registration of `path` and of everything below it. Tracks are
+// the caller's business (deleteTracksCascade).
+export function deleteFolderRegistrationsStatement(db: D1Database, path: string): D1PreparedStatement {
+  const under = underPrefix("path", path);
+  return db.prepare(`DELETE FROM folders WHERE path = ? OR ${under.sql}`).bind(path, ...under.binds);
+}
+
 export type DeleteFolderResult = "deleted" | "not_found" | "not_empty";
 
 // Only removes the folders registration itself — never touches tracks, so a
 // folder with anything under it (tracks, or a nested folder registration)
-// is refused rather than silently orphaning content. Use deleteTrackCascade
-// to actually remove tracks first.
+// is refused rather than silently orphaning content. The Folders view's
+// recursive delete goes through deleteItems (src/subsonic/folders.ts)
+// instead; this stays for the plain "delete empty folder" endpoint.
 export async function deleteFolder(db: D1Database, path: string): Promise<DeleteFolderResult> {
   const [tracks, nestedFolders] = await Promise.all([
-    listTracksUnderPath(db, path),
+    listTrackIdsUnderPath(db, path),
     listFoldersUnderPath(db, path),
   ]);
   if (tracks.length > 0 || nestedFolders.length > 0) return "not_empty";
@@ -835,32 +938,33 @@ export async function deleteFolder(db: D1Database, path: string): Promise<Delete
   return result.meta.changes > 0 ? "deleted" : "not_found";
 }
 
-// Renames just the leaf segment of a folder — every track whose source_path
-// starts with oldPrefix + "/" gets that prefix swapped for newPrefix.
-// Returns how many tracks moved (0 means the folder didn't exist).
-export async function renameFolder(db: D1Database, oldPrefix: string, newPrefix: string): Promise<number> {
-  const trackRows = await listTracksUnderPath(db, oldPrefix);
-  // Also catch an explicit registration for the folder itself (path === oldPrefix,
-  // e.g. it was created empty and may still be) or for any empty sub-folder
-  // registered under it.
-  const { results: folderRows } = await db
-    .prepare(`SELECT path FROM folders WHERE path = ? OR path LIKE ?`)
-    .bind(oldPrefix, `${oldPrefix}/%`)
-    .all<{ path: string }>();
+// Moves folder oldPrefix (and everything in it) to newPrefix — a rename
+// when only the last segment differs. One UPDATE per table, whatever the
+// folder's size. OR REPLACE on folders: a registration that already exists
+// at the target path is the same folder anyway.
+export function movePrefixStatements(db: D1Database, oldPrefix: string, newPrefix: string): D1PreparedStatement[] {
+  const tracks = underPrefix("source_path", oldPrefix);
+  const folders = underPrefix("path", oldPrefix);
+  const tailStart = oldPrefix.length + 1;
+  return [
+    db
+      .prepare(`UPDATE tracks SET source_path = ? || substr(source_path, ?) WHERE ${tracks.sql}`)
+      .bind(newPrefix, tailStart, ...tracks.binds),
+    db
+      .prepare(`UPDATE OR REPLACE folders SET path = ? || substr(path, ?) WHERE path = ? OR ${folders.sql}`)
+      .bind(newPrefix, tailStart, oldPrefix, ...folders.binds),
+  ];
+}
 
-  if (!trackRows.length && !folderRows.length) return 0;
-
-  await db.batch([
-    ...trackRows.map((row) =>
-      db
-        .prepare(`UPDATE tracks SET source_path = ? WHERE id = ?`)
-        .bind(newPrefix + row.source_path!.slice(oldPrefix.length), row.id),
-    ),
-    ...folderRows.map((row) =>
-      db
-        .prepare(`UPDATE folders SET path = ? WHERE path = ?`)
-        .bind(newPrefix + row.path.slice(oldPrefix.length), row.path),
-    ),
-  ]);
-  return trackRows.length + folderRows.length;
+// Sets source_path for many tracks in one statement — `moves` travels as a
+// single JSON array of {id, path} (see deleteTracksCascade on why).
+export function setTrackPathsStatement(db: D1Database, moves: { id: string; path: string }[]): D1PreparedStatement {
+  return db
+    .prepare(
+      `UPDATE tracks SET source_path = (
+         SELECT json_extract(value, '$.path') FROM json_each(?1) WHERE json_extract(value, '$.id') = tracks.id
+       )
+       WHERE id IN (SELECT json_extract(value, '$.id') FROM json_each(?1))`,
+    )
+    .bind(JSON.stringify(moves));
 }

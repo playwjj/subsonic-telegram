@@ -49,7 +49,11 @@ async function handleLogout() {
       </button>
     </nav>
 
-    <main class="mx-auto max-w-5xl px-4 py-5" :class="{ 'pb-24 max-[600px]:pb-32': isLoggedIn() }">
+    <!-- Folders gets more room: it's a file manager with a sidebar tree. -->
+    <main
+      class="mx-auto px-4 py-5"
+      :class="[route.name === 'folders' ? 'max-w-7xl' : 'max-w-5xl', { 'pb-24 max-[600px]:pb-32': isLoggedIn() }]"
+    >
       <RouterView />
     </main>
 
