@@ -7,7 +7,7 @@ defineProps<{ spinning?: boolean }>();
 </script>
 
 <template>
-  <span class="app-logo" :class="{ spinning }" role="img" aria-label="Subsonic Telegram" v-html="logo"></span>
+  <span class="app-logo" :class="{ spinning }" role="img" aria-label="Subgram" v-html="logo"></span>
 </template>
 
 <style scoped>

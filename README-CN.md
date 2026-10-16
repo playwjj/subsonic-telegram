@@ -1,6 +1,8 @@
-<p align="center"><img src="web/src/assets/logo.svg" width="128" alt="Subsonic Telegram logo"></p>
+<p align="center"><img src="web/src/assets/logo.svg" width="128" alt="Subgram logo"></p>
 
-<h1 align="center">Subsonic Telegram</h1>
+<h1 align="center">Subgram</h1>
+
+<p align="center"><b>Sub</b>sonic + Tele<b>gram</b>：用 Telegram 存储的 Subsonic 音乐服务</p>
 
 *[English](README.md) | 中文*
 

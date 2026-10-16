@@ -30,7 +30,7 @@ async function handleSubmit() {
   <div class="login">
     <div class="card">
       <AppLogo class="logo" />
-      <h1>Subsonic Telegram</h1>
+      <h1>Subgram</h1>
       <form @submit.prevent="handleSubmit">
         <input v-model="username" placeholder="Username" autocomplete="username" required />
         <input v-model="password" type="password" placeholder="Password" autocomplete="current-password" required />
