@@ -58,7 +58,6 @@ async function handleSubmit() {
   width: 7rem;
   height: 7rem;
   margin: 0 auto 1rem;
-  filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.45));
 }
 h1 {
   font-size: 1.4rem;
