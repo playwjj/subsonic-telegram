@@ -14,11 +14,13 @@ import {
 import * as browsing from "./subsonic/browsing";
 import * as media from "./subsonic/media";
 import * as folders from "./subsonic/folders";
+import * as trash from "./subsonic/trash";
 import * as q from "./db/queries";
 import { fetchLyrics, fetchStructuredLyrics } from "./lyrics";
 import { TelegramStorage } from "./storage/telegram";
 import { CachedStorage, cacheKey } from "./storage/cached";
 import * as cache from "./db/cache";
+import * as trashDb from "./db/trash";
 import type { StorageBackend } from "./storage/types";
 
 const ERR = {
@@ -61,6 +63,26 @@ const RANDOM_SONGS_RECENT_POOL = 100;
 // getRandomTracksByGenreExcludingArtist in db/queries.ts.
 const SIMILAR_SONGS_ARTIST_RATIO = 0.6;
 
+// Telegram, behind the optional R2 read-through cache when CACHE_BUCKET is
+// bound (see wrangler.toml).
+function makeStorage(env: Env, ctx: ExecutionContext): StorageBackend {
+  const telegram = new TelegramStorage(env.TG_BOT_TOKEN, env.TG_CHANNEL_ID);
+  return env.CACHE_BUCKET
+    ? new CachedStorage(
+        telegram,
+        env.CACHE_BUCKET,
+        env.DB,
+        env.CACHE_MAX_BYTES ? Number(env.CACHE_MAX_BYTES) : DEFAULT_CACHE_MAX_BYTES,
+        ctx,
+      )
+    : telegram;
+}
+
+function retentionDays(env: Env): number {
+  const days = Number(env.TRASH_RETENTION_DAYS);
+  return days > 0 ? days : trash.DEFAULT_RETENTION_DAYS;
+}
+
 function shuffle<T>(items: T[]): T[] {
   const result = [...items];
   for (let i = result.length - 1; i > 0; i--) {
@@ -102,16 +124,7 @@ export default {
     if (endpoint === "getLicense") {
       return respond(subsonicSuccess(node("license", { valid: true })), format);
     }
-    const telegram = new TelegramStorage(env.TG_BOT_TOKEN, env.TG_CHANNEL_ID);
-    const storage: StorageBackend = env.CACHE_BUCKET
-      ? new CachedStorage(
-          telegram,
-          env.CACHE_BUCKET,
-          env.DB,
-          env.CACHE_MAX_BYTES ? Number(env.CACHE_MAX_BYTES) : DEFAULT_CACHE_MAX_BYTES,
-          ctx,
-        )
-      : telegram;
+    const storage = makeStorage(env, ctx);
 
     try {
       switch (endpoint) {
@@ -733,19 +746,84 @@ export default {
         }
       }
 
+      // Moves the song to the trash (see src/subsonic/trash.ts).
       case "deleteTrack": {
         const id = params.get("id");
         if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
-        const { deleted } = await folders.deleteItems(env.DB, storage, [id], []);
-        if (!deleted) return respond(subsonicError(ERR.NOT_FOUND, "Song not found"), format);
+        const { songs } = await trash.trashItems(env.DB, [id], []);
+        if (!songs) return respond(subsonicError(ERR.NOT_FOUND, "Song not found"), format);
         return respond(subsonicSuccess(), format);
       }
 
       // Multi-select delete: any mix of tracks (id) and whole folders (path,
-      // recursively). Permanent, Telegram messages included.
+      // recursively). Goes to the trash — the created entry ids come back
+      // for an "Undo" — unless permanent=true, which deletes right away,
+      // Telegram files included.
       case "deleteItems": {
-        const { deleted } = await folders.deleteItems(env.DB, storage, params.getAll("id"), params.getAll("path"));
-        return respond(subsonicSuccess(node("deleteResult", { deleted })), format);
+        const ids = params.getAll("id");
+        const paths = params.getAll("path");
+        if (params.get("permanent") === "true") {
+          const { deleted } = await folders.deleteItems(env.DB, storage, ids, paths);
+          return respond(subsonicSuccess(node("deleteResult", { deleted, permanent: true })), format);
+        }
+        const { entryIds, songs } = await trash.trashItems(env.DB, ids, paths);
+        return respond(
+          subsonicSuccess(
+            node("deleteResult", { deleted: songs }, { lists: { entry: entryIds.map((id) => node("entry", { id })) } }),
+          ),
+          format,
+        );
+      }
+
+      case "getTrash": {
+        const [entries, pendingDeletes] = await Promise.all([
+          trashDb.listTrashEntries(env.DB),
+          trashDb.countPendingDeletes(env.DB),
+        ]);
+        const days = retentionDays(env);
+        return respond(
+          subsonicSuccess(
+            node(
+              "trash",
+              { retentionDays: days, pendingDeletes },
+              {
+                lists: {
+                  entry: entries.map((e) =>
+                    node("entry", {
+                      id: e.id,
+                      kind: e.kind,
+                      name: e.name,
+                      path: e.path ?? undefined,
+                      songCount: e.song_count,
+                      size: e.size,
+                      deleted: isoDate(e.deleted_at),
+                      expires: isoDate(e.deleted_at + days * 86400),
+                    }),
+                  ),
+                },
+              },
+            ),
+          ),
+          format,
+        );
+      }
+
+      case "restoreTrash": {
+        const ids = params.getAll("id");
+        if (!ids.length) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
+        const result = await trash.restoreTrash(env.DB, storage, ids);
+        return respond(subsonicSuccess(node("restoreResult", { ...result })), format);
+      }
+
+      // Deletes trash entries (id, or all=true) for good. Large purges are
+      // done in chunks: call again while `remaining` > 0.
+      case "purgeTrash": {
+        const ids = params.getAll("id");
+        if (!ids.length && params.get("all") !== "true") {
+          return respond(subsonicError(ERR.MISSING_PARAM, "Missing id or all=true"), format);
+        }
+        const result = await trash.purgeTrash(env.DB, storage, ids.length ? ids : "all");
+        return respond(subsonicSuccess(node("purgeResult", { ...result })), format);
       }
 
       case "moveItems": {
@@ -844,5 +922,11 @@ export default {
       console.error(`Unhandled error in ${endpoint}: ${message}`);
       return respond(subsonicError(0, `Server error in ${endpoint}: ${message}`), format);
     }
+  },
+
+  // Daily cron (wrangler.toml [triggers]): empties trash entries older than
+  // TRASH_RETENTION_DAYS and retries Telegram deletes that failed earlier.
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    await trash.dailyCleanup(env.DB, makeStorage(env, ctx), retentionDays(env));
   },
 } satisfies ExportedHandler<Env>;

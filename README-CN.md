@@ -241,7 +241,7 @@ npm run fix-covers -- --artist-photos [--limit=N] [--dry-run] [--retry-failed]
 
 **播放器**：支持随机播放（播放条上的 🔀 是对当前队列的开关；各处的「🔀 Shuffle」按钮则直接打乱一组歌开始播——专辑、歌单（详情页和歌单列表的每一行）、艺人、文件夹（含子文件夹）、收藏、Songs 页（「Shuffle all」，整个曲库），以及首页 Random Songs 旁边的「Shuffle library」。艺人/文件夹/整个曲库这几个通过本项目自己的 `getShuffleSongs` 接口均匀随机抽最多 500 首；关掉随机会恢复原顺序）、循环（关/列表/单曲）和音量调节（随机/循环/音量设置存在 `localStorage`）。播放队列会通过 `savePlayQueue` 同步到服务端，打开页面时用 `getPlayQueue` 恢复到上次的歌和进度（暂停状态），刷新页面或者从别的 Subsonic 客户端过来都能续播；因为所有 id 都要拼进 URL 查询参数，只保存当前曲目前后共 200 首的窗口。手机上（≤600px）播放条会分成两行——封面/歌名/播放控制一行，进度条和歌词/队列按钮一行——并隐藏星级评分和音量条。锁屏/通知栏控制和键盘媒体键走的是 Media Session API。播放条上的 ☰ 打开播放队列（点任意一首跳过去播、移除单首或清空队列）；每一行歌曲的 ⋯ 菜单里有「Play next」（下一首播放）和「Add to queue」（加到队列末尾）。
 
-**Folders 是什么**：按 `source_path`（`npm run import` 记录的、相对导入根目录的路径）还原出原始文件夹树，跟 Artists 那种按 ID3 标签分组的浏览方式并列存在。对那些"合集"文件夹（比如按月份存的热歌榜）特别有用——这类文件夹里每首歌的 ID3 艺人标签都不一样，按 Artists 浏览会被打散到几十上百个艺人名下，按 Folders 浏览则完全保留原来"一个文件夹一份合集"的样子。对应的后端接口是 `getFolder`、`getFolderTree`、`getFolderSongs`、`moveItems`、`renameTrackFile`、`deleteItems`、`getTrackStorage` 等（逻辑在 `src/subsonic/folders.ts`），跟 `getLibraryStats`/`getSongs`/`getRecentlyPlayed`/`getMostPlayed` 一样，都不是 Subsonic 官方协议的一部分，只服务于这个项目自己的 Web UI。
+**Folders 是什么**：按 `source_path`（`npm run import` 记录的、相对导入根目录的路径）还原出原始文件夹树，跟 Artists 那种按 ID3 标签分组的浏览方式并列存在。对那些"合集"文件夹（比如按月份存的热歌榜）特别有用——这类文件夹里每首歌的 ID3 艺人标签都不一样，按 Artists 浏览会被打散到几十上百个艺人名下，按 Folders 浏览则完全保留原来"一个文件夹一份合集"的样子。对应的后端接口是 `getFolder`、`getFolderTree`、`getFolderSongs`、`moveItems`、`renameTrackFile`、`deleteItems`、`getTrackStorage`、`getTrash`、`restoreTrash`、`purgeTrash` 等（逻辑在 `src/subsonic/folders.ts` 和 `src/subsonic/trash.ts`），跟 `getLibraryStats`/`getSongs`/`getRecentlyPlayed`/`getMostPlayed` 一样，都不是 Subsonic 官方协议的一部分，只服务于这个项目自己的 Web UI。
 
 ### 从 Web UI 管理歌库
 
@@ -250,7 +250,7 @@ Upload 页面（导航栏里的 Upload）和任意 Folders 页面点"⬆ Upload 
 - 跟 `npm run import` 一样是 19MB 上限（Telegram `getFile` 的下载限制）——超过这个大小的文件即使传上去了也永远放不回来，所以前端和后端都会拒绝。
 - 可选的"Folder"字段（比如 `80s/Rock`）会设置 `source_path`，这样这首歌也会出现在 Folders 视图里——留空的话就只出现在 Artists/Songs 里，不会出现在 Folders。
 - 这个表单不处理封面——用它建的新专辑就是没有封面，跟任何 `cover_ref` 为空的专辑一样。
-- **删除歌曲**（Songs/Album 列表行上的 🗑 按钮——playlist 和搜索结果视图没有这个按钮，它们各自已经有语义不同的"从歌单移除"/什么都没有）会把这首歌从 D1 永久删除（顺带清理它在 playlist、收藏里的引用，如果这是所在专辑/艺人的最后一首歌，专辑/艺人也会一并删除），并尽力删除对应的 Telegram 消息（见上面「删除消息」bot 权限那条说明）。
+- **删除歌曲**（Songs/Album 列表行上的 🗑 按钮——playlist 和搜索结果视图没有这个按钮，它们各自已经有语义不同的"从歌单移除"/什么都没有）会把这首歌移进回收站（见下文）。
 
 **Folders 页面是一个网盘式的文件管理器**：
 
@@ -260,10 +260,14 @@ Upload 页面（导航栏里的 Upload）和任意 Folders 页面点"⬆ Upload 
 - **键盘**：Delete（或 ⌘/Ctrl+Backspace）删除，F2 重命名，Enter 打开/播放，Backspace 返回上级，Ctrl/⌘+A 全选，↑/↓ 移动选择，Esc 取消选择。
 - **移动**：「移动到…」从文件夹树里选目标；也可以把选中项直接拖到某个文件夹行、左侧树或面包屑上。文件夹会连同里面的所有内容一起移动。目标位置有重名时，会问你是「两个都保留」（移过去的改名为 `name (1).mp3`）还是「跳过这些」。把东西全部移走或删光之后，原来的文件夹会以空文件夹的形式保留，而不是消失。
 - **重命名**文件只改文件名（`source_path` 的最后一段），不改标题标签；文件夹改名时如果新名字已被占用会直接拒绝，而不是悄悄合并两个文件夹。两者都不涉及 Telegram。
-- **删除**支持歌曲和文件夹混选、递归删除，确认框会显示总共多少首、多大。删除是永久的：歌曲从 D1 删除的方式跟上面的单曲删除一样，Telegram 消息用 `deleteMessages` 批量删除（每次 100 条）。
+- **删除**支持歌曲和文件夹混选、递归删除，会把它们移进回收站——不弹确认框，但随后的提示条上有「Undo」可以撤销。菜单里的「Delete forever…」（或 Shift+Delete）会跳过回收站直接永久删除，确认框会显示总共多少首、多大。
 - 「+ New folder」会在一张小的 `folders` 表里登记一个路径——文件夹本来完全是从 track 的 `source_path` 推算出来的，这是让一个文件夹在没有内容时也能存在的办法。列表会合并这两个来源。
 
 文件夹列表通过 `dir` 列（`source_path` 的父路径，一个生成列，见 `db/schema.sql`）上的索引直接读出每个文件夹的统计，不再把文件夹下的所有歌曲都查出来；所有前缀匹配都改用 `[prefix + "/", prefix + "0")` 区间而不是 `LIKE`，所以文件夹名里的 `_`/`%` 会按字面匹配。多选操作把 id 列表放在 POST 表单里发送（OpenSubsonic 的 `formPost` 扩展，任何客户端都能用），因为几百个 id 放不进 URL。
+
+**回收站**：在 Web UI 里删除的东西会进回收站（Folders 侧栏底部的 🗑 Trash，窄屏上是 Folders 工具栏里的 🗑 按钮），而不是直接删除。删除一个文件夹是一条回收站记录，包含它下面的所有内容；单独删除的每首歌各是一条记录。这些行会从正常的表里移走，所以回收站里的歌会立刻从所有页面和第三方客户端里消失，但 Telegram 那边暂时不动。**还原**会把歌曲连同一起删掉的东西都放回去：因此变空而被删掉的专辑和艺人、收藏、文件夹登记，以及歌单条目（原位置还空着就放回原位置，否则放到歌单末尾）。如果原来的文件名在这期间被占用了，还原后会叫 `name (1).mp3`。**永久删除**（单条，或「Empty trash」清空）会用 `deleteMessages` 删除 Telegram 文件，每次 100 条；特别大的清空会拆成几次请求完成。超过 `TRASH_RETENTION_DAYS`（`[vars]` 里的设置，默认 30 天）的记录由每天一次的 Cron Trigger 自动清理（`wrangler.toml` 的 `[triggers]`，`src/index.ts` 的 `scheduled()`）。Telegram 删除失败时（比如 bot 没有「删除消息」权限），会记到 `pending_deletes` 表里，由同一个定时任务重试，而不是留下孤儿消息；回收站页面会显示还有多少条在等待重试。
+
+回收站、重试队列和它们的索引都是 `CREATE TABLE IF NOT EXISTS`，所以对已有数据库跑一次 `npm run db:migrate:remote` 就能加上。
 
 **升级已有数据库**（在 `dir` 列出现之前建的库）需要在部署前执行一次下面的命令，然后照常跑 `npm run db:migrate:remote` 建索引：
 

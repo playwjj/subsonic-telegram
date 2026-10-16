@@ -4,6 +4,7 @@
 // db/schema.sql); everything here works on both.
 import * as q from "../db/queries";
 import type { StorageBackend } from "../storage/types";
+import { queuePendingDeletes } from "../db/trash";
 
 // A failure the user caused (bad name, missing folder, name clash) rather
 // than a server fault — src/index.ts reports these as-is instead of as a
@@ -116,7 +117,7 @@ async function childNames(db: D1Database, dir: string): Promise<Set<string>> {
 
 // "song.mp3" -> "song (1).mp3" (or "Folder" -> "Folder (1)"), counting up
 // until it's free.
-function uniqueName(name: string, taken: Set<string>, isFile: boolean): string {
+export function uniqueName(name: string, taken: Set<string>, isFile: boolean): string {
   const dot = isFile ? name.lastIndexOf(".") : -1;
   const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ""];
   for (let i = 1; ; i++) {
@@ -125,7 +126,7 @@ function uniqueName(name: string, taken: Set<string>, isFile: boolean): string {
   }
 }
 
-function trackFileName(t: q.TrackRow): string {
+export function trackFileName(t: { source_path: string | null; title: string; suffix: string }): string {
   return t.source_path ? baseName(t.source_path) : `${t.title}.${t.suffix}`;
 }
 
@@ -231,9 +232,36 @@ export async function renameTrackFile(db: D1Database, id: string, newName: strin
   return newPath;
 }
 
+// After deleting (or trashing) `folderPaths` and tracks that lived at
+// `sourcePaths`: re-registers the folders they were in so those stay around
+// even if now empty — unless that folder is itself one being deleted.
+export function keepParentsStatement(
+  db: D1Database,
+  folderPaths: string[],
+  sourcePaths: (string | null)[],
+): D1PreparedStatement | null {
+  const doomed = (dir: string) => folderPaths.some((p) => dir === p || dir.startsWith(`${p}/`));
+  const parents = [...folderPaths, ...sourcePaths.filter((p): p is string => p !== null)].map(parentOf);
+  return q.keepFoldersStatement(
+    db,
+    parents.filter((dir) => !doomed(dir)),
+  );
+}
+
+// Deletes Telegram files; whatever fails is queued in pending_deletes for
+// the daily cron to retry instead of being left behind as orphans.
+export async function deleteFilesOrQueue(db: D1Database, storage: StorageBackend, refs: string[]): Promise<void> {
+  if (!refs.length) return;
+  const { failed, error } = await storage.deleteFiles(refs);
+  if (failed.length) {
+    console.warn(`Failed to delete ${failed.length} Telegram files, queued for retry: ${error}`);
+    await queuePendingDeletes(db, failed, error);
+  }
+}
+
 // Permanently deletes tracks and whole folders (recursively), Telegram
-// messages included. Telegram failures are logged, not fatal — same
-// tolerance deleteTrack has always had (see TelegramStorage.deleteFile).
+// files included — the "Delete forever" path; a normal delete goes to the
+// trash instead (src/subsonic/trash.ts).
 export async function deleteItems(
   db: D1Database,
   storage: StorageBackend,
@@ -248,24 +276,10 @@ export async function deleteItems(
   const removed = await q.deleteTracksCascade(db, [...ids]);
 
   const statements = folderPaths.map((path) => q.deleteFolderRegistrationsStatement(db, path));
-  // Keep the folders things were deleted from, even if that emptied them —
-  // unless that folder is itself being deleted.
-  const doomed = (dir: string) => folderPaths.some((p) => dir === p || dir.startsWith(`${p}/`));
-  const keep = q.keepFoldersStatement(
-    db,
-    [...folderPaths.map(parentOf), ...removed.map((r) => (r.sourcePath ? parentOf(r.sourcePath) : ""))].filter(
-      (dir) => !doomed(dir),
-    ),
-  );
+  const keep = keepParentsStatement(db, folderPaths, removed.map((r) => r.sourcePath));
   if (keep) statements.push(keep);
   if (statements.length) await db.batch(statements);
 
-  if (removed.length) {
-    try {
-      await storage.deleteFiles(removed.map((r) => r.fileRef));
-    } catch (err) {
-      console.warn(`Failed to delete Telegram messages for ${removed.length} tracks: ${err}`);
-    }
-  }
+  await deleteFilesOrQueue(db, storage, removed.map((r) => r.fileRef));
   return { deleted: removed.length };
 }

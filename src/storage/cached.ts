@@ -1,4 +1,4 @@
-import type { SourceStorage, StorageBackend } from "./types";
+import type { DeleteFilesResult, SourceStorage, StorageBackend } from "./types";
 import { parseRange, rangeHeaders } from "./range";
 import * as cache from "../db/cache";
 
@@ -38,8 +38,8 @@ export class CachedStorage implements StorageBackend {
     );
   }
 
-  async deleteFiles(refs: string[]): Promise<void> {
-    await this.source.deleteFiles(refs);
+  async deleteFiles(refs: string[]): Promise<DeleteFilesResult> {
+    const result = await this.source.deleteFiles(refs);
     const keys = await Promise.all(refs.map(cacheKey));
     // R2's bulk delete takes up to 1000 keys per call.
     const chunks: string[][] = [];
@@ -49,6 +49,7 @@ export class CachedStorage implements StorageBackend {
         .then(() => cache.deleteCacheEntries(this.db, keys))
         .catch((err) => console.warn(`Cache cleanup failed for deleted files: ${err}`)),
     );
+    return result;
   }
 
   async getFileResponse(ref: string, rangeHeader: string | null, contentType?: string): Promise<Response> {

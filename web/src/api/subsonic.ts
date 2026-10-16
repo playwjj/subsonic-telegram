@@ -412,13 +412,69 @@ export async function moveItems(opts: {
   return { moved: r.moved, skipped: r.skipped, conflicts: (r.conflict ?? []).map((c) => c.name) };
 }
 
-// Permanent: songs and whole folders (recursively), Telegram files included.
-export async function deleteItems(opts: { songIds: string[]; folderPaths: string[] }): Promise<number> {
-  const body = await callPost<{ deleteResult: { deleted: number } }>("deleteItems", {
+// Songs and whole folders (recursively). Goes to the trash — the returned
+// entry ids can be passed to restoreTrash to undo — unless `permanent`,
+// which deletes right away, Telegram files included.
+export async function deleteItems(opts: {
+  songIds: string[];
+  folderPaths: string[];
+  permanent?: boolean;
+}): Promise<{ deleted: number; entryIds: string[] }> {
+  const body = await callPost<{ deleteResult: { deleted: number; entry?: { id: string }[] } }>("deleteItems", {
     id: opts.songIds,
     path: opts.folderPaths,
+    permanent: opts.permanent ? "true" : undefined,
   });
-  return body.deleteResult.deleted;
+  return { deleted: body.deleteResult.deleted, entryIds: (body.deleteResult.entry ?? []).map((e) => e.id) };
+}
+
+export interface TrashEntry {
+  id: string;
+  kind: "folder" | "track";
+  name: string;
+  // Original folder path / file path; absent for a song that wasn't in a folder.
+  path?: string;
+  songCount: number;
+  size: number;
+  deleted: string;
+  expires: string;
+}
+
+export interface TrashListing {
+  entries: TrashEntry[];
+  retentionDays: number;
+  // Telegram files whose deletion failed and is being retried daily.
+  pendingDeletes: number;
+}
+
+export async function getTrash(): Promise<TrashListing> {
+  const body = await call<{ trash: { retentionDays: number; pendingDeletes: number; entry?: TrashEntry[] } }>("getTrash");
+  return { entries: body.trash.entry ?? [], retentionDays: body.trash.retentionDays, pendingDeletes: body.trash.pendingDeletes };
+}
+
+export interface RestoreResult {
+  restored: number;
+  renamed: number;
+  skipped: number;
+}
+
+export async function restoreTrash(ids: string[]): Promise<RestoreResult> {
+  const body = await callPost<{ restoreResult: RestoreResult }>("restoreTrash", { id: ids });
+  return body.restoreResult;
+}
+
+// Deletes trash entries for good (or everything, with "all"). The Worker
+// does big purges in chunks, so this keeps calling until it's all done.
+export async function purgeTrash(ids: string[] | "all"): Promise<number> {
+  let purged = 0;
+  for (;;) {
+    const body = await callPost<{ purgeResult: { purged: number; remaining: number } }>(
+      "purgeTrash",
+      ids === "all" ? { all: "true" } : { id: ids },
+    );
+    purged += body.purgeResult.purged;
+    if (!body.purgeResult.remaining || !body.purgeResult.purged) return purged;
+  }
 }
 
 // Renames the file (last segment of the song's path), not its title tag.

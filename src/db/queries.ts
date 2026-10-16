@@ -709,6 +709,15 @@ export async function listTracksUnderPath(
   return results;
 }
 
+export async function listTrackSizesUnderPath(db: D1Database, prefix: string): Promise<{ id: string; size: number }[]> {
+  const under = underPrefix("source_path", prefix);
+  const { results } = await db
+    .prepare(`SELECT id, size FROM tracks WHERE ${under.sql}`)
+    .bind(...under.binds)
+    .all<{ id: string; size: number }>();
+  return results;
+}
+
 export async function listTrackIdsUnderPath(db: D1Database, prefix: string): Promise<string[]> {
   const under = underPrefix("source_path", prefix);
   const { results } = await db
@@ -846,32 +855,42 @@ export interface DeletedTrackInfo {
   sourcePath: string | null;
 }
 
+export interface TrackDeleteRow {
+  id: string;
+  file_ref: string;
+  source_path: string | null;
+  album_id: string;
+  artist_id: string;
+}
+
+export async function getTracksForDelete(db: D1Database, trackIds: string[]): Promise<TrackDeleteRow[]> {
+  if (!trackIds.length) return [];
+  const { results } = await db
+    .prepare(
+      `SELECT id, file_ref, source_path, album_id, artist_id FROM tracks WHERE id IN (SELECT value FROM json_each(?))`,
+    )
+    .bind(JSON.stringify(trackIds))
+    .all<TrackDeleteRow>();
+  return results;
+}
+
 // db/schema.sql has no ON DELETE behavior at all, so playlist_tracks/starred
 // rows referencing these tracks (and albums/artists left with nothing in
 // them) have to be cleaned up by hand here. Set-based, so the number of
 // statements stays the same whether this is one track or a whole folder
 // (D1 caps queries per Worker invocation); ids travel as one JSON array
 // param via json_each rather than one bind per id (D1 caps those at 100).
-export async function deleteTracksCascade(db: D1Database, trackIds: string[]): Promise<DeletedTrackInfo[]> {
-  if (!trackIds.length) return [];
-  const ids = JSON.stringify(trackIds);
-  const { results } = await db
-    .prepare(
-      `SELECT file_ref, source_path, album_id, artist_id FROM tracks WHERE id IN (SELECT value FROM json_each(?))`,
-    )
-    .bind(ids)
-    .all<{ file_ref: string; source_path: string | null; album_id: string; artist_id: string }>();
-  if (!results.length) return [];
-
-  const albumIds = JSON.stringify([...new Set(results.map((r) => r.album_id))]);
-  const artistIds = JSON.stringify([...new Set(results.map((r) => r.artist_id))]);
+// Meant for a db.batch(), which runs as one transaction, in order — so the
+// album/artist checks already see the tracks gone.
+export function cascadeDeleteStatements(db: D1Database, rows: TrackDeleteRow[]): D1PreparedStatement[] {
+  if (!rows.length) return [];
+  const ids = JSON.stringify(rows.map((r) => r.id));
+  const albumIds = JSON.stringify([...new Set(rows.map((r) => r.album_id))]);
+  const artistIds = JSON.stringify([...new Set(rows.map((r) => r.artist_id))]);
   const emptyAlbums = `SELECT value FROM json_each(?) WHERE NOT EXISTS (SELECT 1 FROM tracks WHERE album_id = value)`;
   const emptyArtists = `SELECT value FROM json_each(?) WHERE NOT EXISTS (SELECT 1 FROM albums WHERE artist_id = value)
     AND NOT EXISTS (SELECT 1 FROM tracks WHERE artist_id = value)`;
-
-  // A batch runs as one transaction, in order — so the album/artist checks
-  // below already see the tracks gone.
-  await db.batch([
+  return [
     db.prepare(`DELETE FROM playlist_tracks WHERE track_id IN (SELECT value FROM json_each(?))`).bind(ids),
     db.prepare(`DELETE FROM starred WHERE item_type = 'track' AND item_id IN (SELECT value FROM json_each(?))`).bind(ids),
     db.prepare(`DELETE FROM tracks WHERE id IN (SELECT value FROM json_each(?))`).bind(ids),
@@ -879,9 +898,14 @@ export async function deleteTracksCascade(db: D1Database, trackIds: string[]): P
     db.prepare(`DELETE FROM albums WHERE id IN (${emptyAlbums})`).bind(albumIds),
     db.prepare(`DELETE FROM starred WHERE item_type = 'artist' AND item_id IN (${emptyArtists})`).bind(artistIds),
     db.prepare(`DELETE FROM artists WHERE id IN (${emptyArtists})`).bind(artistIds),
-  ]);
+  ];
+}
 
-  return results.map((r) => ({ fileRef: r.file_ref, sourcePath: r.source_path }));
+export async function deleteTracksCascade(db: D1Database, trackIds: string[]): Promise<DeletedTrackInfo[]> {
+  const rows = await getTracksForDelete(db, trackIds);
+  if (!rows.length) return [];
+  await db.batch(cascadeDeleteStatements(db, rows));
+  return rows.map((r) => ({ fileRef: r.file_ref, sourcePath: r.source_path }));
 }
 
 // Explicit folder registrations — see db/schema.sql. getFolder merges

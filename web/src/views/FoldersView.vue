@@ -10,6 +10,7 @@ import {
   renameTrackFile,
   moveItems,
   deleteItems,
+  restoreTrash,
   coverArtUrl,
   downloadUrl,
   SubsonicError,
@@ -318,12 +319,13 @@ async function playFolder() {
 
 // --- feedback ---
 
-const notice = ref("");
+// A toast, optionally with one action button (e.g. "Undo").
+const notice = ref<{ message: string; action?: { label: string; run: () => void } } | null>(null);
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
-function notify(message: string) {
-  notice.value = message;
+function notify(message: string, action?: { label: string; run: () => void }) {
+  notice.value = { message, action };
   clearTimeout(noticeTimer);
-  noticeTimer = setTimeout(() => (notice.value = ""), 3500);
+  noticeTimer = setTimeout(() => (notice.value = null), action ? 8000 : 3500);
 }
 
 async function attempt(action: () => Promise<void>) {
@@ -452,12 +454,34 @@ function dropInto(path: string) {
   if (payload && canDropInto(path, payload) && path !== currentPath.value) moveTo(payload, path);
 }
 
-// --- delete ---
+// --- delete: to the trash (with Undo), or forever ---
+
+async function trash(list: Entry[]) {
+  if (!list.length) return;
+  await attempt(async () => {
+    const { deleted, entryIds } = await deleteItems(payloadOf(list));
+    const what = list.length === 1 ? `“${list[0].name}”` : plural(list.length, "item");
+    notify(`Moved ${what} to the trash${list.some((e) => e.kind === "dir") ? ` (${plural(deleted, "song")})` : ""}`, {
+      label: "Undo",
+      run: () => undo(entryIds),
+    });
+    await refresh();
+  });
+}
+
+async function undo(entryIds: string[]) {
+  notice.value = null;
+  await attempt(async () => {
+    const { restored, renamed } = await restoreTrash(entryIds);
+    notify(`Restored ${plural(restored, "song")}${renamed ? ` (${renamed} renamed — the name was taken)` : ""}`);
+    await refresh();
+  });
+}
 
 const deleteDialog = ref<{ payload: DragPayload; label: string; songCount: number; size: number } | null>(null);
 const deleting = ref(false);
 
-function askDelete(list: Entry[]) {
+function askDeleteForever(list: Entry[]) {
   if (!list.length) return;
   const folders = list.filter((e) => e.kind === "dir").length;
   const label = [folders && plural(folders, "folder"), list.length - folders && plural(list.length - folders, "song")]
@@ -471,13 +495,13 @@ function askDelete(list: Entry[]) {
   };
 }
 
-async function confirmDelete() {
+async function confirmDeleteForever() {
   if (!deleteDialog.value) return;
   deleting.value = true;
   await attempt(async () => {
-    const deleted = await deleteItems(deleteDialog.value!.payload);
+    const { deleted } = await deleteItems({ ...deleteDialog.value!.payload, permanent: true });
     deleteDialog.value = null;
-    notify(`Deleted ${plural(deleted, "song")}`);
+    notify(`Deleted ${plural(deleted, "song")} forever`);
     await refresh();
   });
   deleting.value = false;
@@ -544,7 +568,8 @@ function selectionActions(list: Entry[]): MenuItem[] {
       action: () => download(list.flatMap((e) => (e.kind === "song" ? [e.song] : []))),
     },
     { label: "Properties", disabled: !single, action: () => single && showProperties(single) },
-    { label: "Delete…", separated: true, danger: true, action: () => askDelete(list) },
+    { label: "Move to trash", separated: true, danger: true, action: () => trash(list) },
+    { label: "Delete forever…", danger: true, action: () => askDeleteForever(list) },
   );
   return items;
 }
@@ -605,9 +630,12 @@ function onKeydown(e: KeyboardEvent) {
     selectAll();
   } else if (e.key === "Escape") {
     selected.clear();
+  } else if (e.shiftKey && e.key === "Delete") {
+    e.preventDefault();
+    askDeleteForever(list);
   } else if (e.key === "Delete" || (mod && e.key === "Backspace")) {
     e.preventDefault();
-    askDelete(list);
+    trash(list);
   } else if (e.key === "Backspace" && !searching.value && currentPath.value) {
     e.preventDefault();
     navigate(parentOf(currentPath.value));
@@ -653,6 +681,7 @@ const columns: { key: SortKey; label: string; class: string }[] = [
       <p v-if="folderTree.loaded" class="mt-2 border-t border-[var(--border)] px-2 pt-2 text-xs text-[var(--text-dim)]">
         {{ folderTree.root.songCount.toLocaleString() }} songs · {{ formatBytes(folderTree.root.size) }}
       </p>
+      <RouterLink :to="{ name: 'trash' }" class="trash-link">🗑 Trash</RouterLink>
     </aside>
 
     <section class="min-w-0 flex-1" @contextmenu.self.prevent="openMenu($event)">
@@ -683,6 +712,7 @@ const columns: { key: SortKey; label: string; class: string }[] = [
           title="Shuffle everything in this folder, including subfolders"
           :load="() => getShuffleSongs({ path: currentPath })"
         />
+        <RouterLink :to="{ name: 'trash' }" class="trash-button" title="Trash">🗑</RouterLink>
         <input v-model="query" type="search" class="search ml-auto" placeholder="Search in this folder…" />
         <div class="segmented" role="group" aria-label="View">
           <button :class="{ active: prefs.mode === 'list' }" title="List view" @click="prefs.mode = 'list'">☰</button>
@@ -700,7 +730,9 @@ const columns: { key: SortKey; label: string; class: string }[] = [
         <span class="text-[var(--text-dim)]">· {{ formatBytes(selectionSize) }}</span>
         <div class="ml-auto flex flex-wrap gap-1.5">
           <button
-            v-for="item in selectionActions(selectedEntries).filter((i) => !i.disabled && i.label !== 'Open')"
+            v-for="item in selectionActions(selectedEntries).filter(
+              (i) => !i.disabled && i.label !== 'Open' && i.label !== 'Delete forever…',
+            )"
             :key="item.label"
             :class="{ danger: item.danger }"
             @click="item.action()"
@@ -904,7 +936,10 @@ const columns: { key: SortKey; label: string; class: string }[] = [
     </section>
 
     <Transition name="fade">
-      <div v-if="notice" class="notice glass">{{ notice }}</div>
+      <div v-if="notice" class="notice glass">
+        {{ notice.message }}
+        <button v-if="notice.action" class="notice-action" @click="notice.action.run()">{{ notice.action.label }}</button>
+      </div>
     </Transition>
 
     <ContextMenu v-if="menu" :x="menu.x" :y="menu.y" :items="menu.items" @close="menu = null" />
@@ -942,12 +977,12 @@ const columns: { key: SortKey; label: string; class: string }[] = [
 
     <ConfirmDialog
       v-if="deleteDialog"
-      title="Delete permanently?"
-      confirm-label="Delete"
+      title="Delete forever?"
+      confirm-label="Delete forever"
       danger
       :busy="deleting"
       @close="deleteDialog = null"
-      @confirm="confirmDelete"
+      @confirm="confirmDeleteForever"
     >
       <p>
         Delete {{ deleteDialog.label }}?
@@ -957,7 +992,8 @@ const columns: { key: SortKey; label: string; class: string }[] = [
         </template>
       </p>
       <p v-if="deleteDialog.songCount" class="text-[var(--text-dim)]">
-        The files are deleted from Telegram too, and they're also removed from playlists and favorites. This can't be undone.
+        This skips the trash: the files are deleted from Telegram right away, and they're removed from playlists and
+        favorites. This can't be undone.
       </p>
     </ConfirmDialog>
 
@@ -1283,6 +1319,41 @@ const columns: { key: SortKey; label: string; class: string }[] = [
   }
 }
 
+/* Pinned to the bottom of the (scrolling) sidebar so a long tree can't
+   push it out of sight. */
+.trash-link {
+  position: sticky;
+  bottom: -0.4rem;
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+  padding: 0.45rem 0.4rem 0.45rem 1.5rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.875rem;
+  background: rgb(26, 29, 36);
+}
+.trash-link:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+/* The sidebar (and its Trash link) is hidden on narrow screens. */
+.trash-button {
+  display: none;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+@media (max-width: 1023px) {
+  .trash-button {
+    display: block;
+  }
+}
+.notice-action {
+  margin-left: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .notice {
   position: fixed;
   left: 50%;

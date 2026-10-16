@@ -1,4 +1,4 @@
-import type { StorageBackend } from "./types";
+import type { DeleteFilesResult, StorageBackend } from "./types";
 import { parseRange, rangeHeaders } from "./range";
 
 interface TelegramRef {
@@ -112,18 +112,29 @@ export class TelegramStorage implements StorageBackend {
   // Same permission requirement and failure tolerance as deleteFile, but
   // through deleteMessages so deleting a whole folder costs one Telegram
   // call per 100 files rather than one per file (Workers cap subrequests).
-  async deleteFiles(refStrs: string[]): Promise<void> {
-    const messageIds = refStrs.map((r) => (JSON.parse(r) as TelegramRef).messageId);
-    const failures: string[] = [];
-    for (let i = 0; i < messageIds.length; i += MAX_DELETE_BATCH) {
-      const res = await fetch(this.api("deleteMessages"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: this.channelId, message_ids: messageIds.slice(i, i + MAX_DELETE_BATCH) }),
-      });
-      const data = (await res.json()) as any;
-      if (!data.ok) failures.push(JSON.stringify(data));
+  async deleteFiles(refStrs: string[]): Promise<DeleteFilesResult> {
+    const failed: string[] = [];
+    let error: string | undefined;
+    for (let i = 0; i < refStrs.length; i += MAX_DELETE_BATCH) {
+      const batch = refStrs.slice(i, i + MAX_DELETE_BATCH);
+      try {
+        const res = await fetch(this.api("deleteMessages"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: this.channelId,
+            message_ids: batch.map((r) => (JSON.parse(r) as TelegramRef).messageId),
+          }),
+        });
+        const data = (await res.json()) as any;
+        if (!data.ok) throw new Error(JSON.stringify(data));
+      } catch (err) {
+        // deleteMessages is all-or-nothing per call (missing messages are
+        // skipped, not errors), so a failure means this whole batch.
+        failed.push(...batch);
+        error = `Telegram deleteMessages failed: ${err instanceof Error ? err.message : String(err)}`;
+      }
     }
-    if (failures.length) throw new Error(`Telegram deleteMessages failed: ${failures.join("; ")}`);
+    return { failed, error };
   }
 }

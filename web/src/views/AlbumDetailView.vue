@@ -26,7 +26,7 @@ function playFrom(index: number) {
 }
 
 async function handleDelete(song: Song) {
-  if (!confirm(`Permanently delete "${song.title}"? This also removes the file from Telegram.`)) return;
+  if (!confirm(`Move "${song.title}" to the trash? You can restore it from Folders → Trash.`)) return;
   await deleteTrack(song.id);
   if (!album.value) return;
   // Deleting an album's last track deletes the now-empty album server-side

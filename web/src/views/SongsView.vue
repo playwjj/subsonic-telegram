@@ -29,7 +29,7 @@ function changeSort(next: SongSort) {
 }
 
 async function handleDelete(song: Song) {
-  if (!confirm(`Permanently delete "${song.title}"? This also removes the file from Telegram.`)) return;
+  if (!confirm(`Move "${song.title}" to the trash? You can restore it from Folders → Trash.`)) return;
   await deleteTrack(song.id);
   songs.value = songs.value.filter((s) => s.id !== song.id);
   total.value--;

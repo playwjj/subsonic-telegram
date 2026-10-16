@@ -7,8 +7,10 @@ export interface StorageBackend {
   putFile(bytes: Uint8Array, filename: string, mimeType: string): Promise<string>;
   getFileResponse(ref: string, rangeHeader: string | null, contentType?: string): Promise<Response>;
   deleteFile(ref: string): Promise<void>;
-  // Bulk version of deleteFile for folder/multi-select deletes.
-  deleteFiles(refs: string[]): Promise<void>;
+  // Bulk version of deleteFile for folder/multi-select deletes. Doesn't
+  // throw on failure: reports which refs couldn't be deleted (and why) so the
+  // caller can queue them for a retry.
+  deleteFiles(refs: string[]): Promise<DeleteFilesResult>;
 }
 
 // A backend that can also hand back a whole file's raw bytes in one shot.
@@ -16,4 +18,9 @@ export interface StorageBackend {
 // populate its cache on a miss — TelegramStorage implements it.
 export interface SourceStorage extends StorageBackend {
   getFileBytes(ref: string, contentType?: string): Promise<{ bytes: Uint8Array; contentType: string }>;
+}
+
+export interface DeleteFilesResult {
+  failed: string[];
+  error?: string;
 }

@@ -5,8 +5,8 @@ import AddToPlaylistMenu from "./AddToPlaylistMenu.vue";
 import QueueMenu from "./QueueMenu.vue";
 import StarRating from "./StarRating.vue";
 
-// `deletable` is opt-in per view: library views (Songs/Album/Folders) show a
-// permanent-delete button, but derived views like a playlist or search
+// `deletable` is opt-in per view: library views (Songs/Album) show a
+// delete (to trash) button, but derived views like a playlist or search
 // results don't — a playlist already has its own "remove from playlist"
 // action (updatePlaylist), which is a different, much less destructive thing.
 const props = defineProps<{ song: Song; deletable?: boolean }>();
@@ -62,7 +62,7 @@ function formatDuration(sec?: number): string {
     </button>
     <QueueMenu :song="song" />
     <AddToPlaylistMenu :song-id="song.id" />
-    <button v-if="deletable" class="delete-btn" title="Delete permanently" @click="emit('delete')">🗑</button>
+    <button v-if="deletable" class="delete-btn" title="Move to trash" @click="emit('delete')">🗑</button>
   </div>
 </template>
 

@@ -11,4 +11,7 @@ export interface Env {
   // before this cache existed.
   CACHE_BUCKET?: R2Bucket;
   CACHE_MAX_BYTES?: string;
+  // Days a deleted item stays in the trash before the daily cron purges it
+  // (default 30, see src/subsonic/trash.ts).
+  TRASH_RETENTION_DAYS?: string;
 }

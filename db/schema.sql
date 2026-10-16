@@ -128,3 +128,39 @@ CREATE TABLE IF NOT EXISTS cache_entries (
   last_accessed INTEGER NOT NULL  -- unix seconds; eviction removes oldest first
 );
 CREATE INDEX IF NOT EXISTS idx_cache_entries_last_accessed ON cache_entries(last_accessed);
+
+-- Trash (recycle bin) for the web UI's deletes — see src/subsonic/trash.ts.
+-- One entry per deleted folder (everything that was under it) or per
+-- individually deleted song. Rows removed from the live tables are kept in
+-- trash_rows as JSON objects of their columns (tbl = source table name), so
+-- an entry can be restored exactly, including the albums/artists, stars,
+-- playlist positions and folder registrations that went with it. The
+-- Telegram files stay untouched until an entry is purged (by hand, or by the
+-- daily cron after TRASH_RETENTION_DAYS).
+CREATE TABLE IF NOT EXISTS trash (
+  id         TEXT PRIMARY KEY,
+  kind       TEXT NOT NULL,     -- 'folder' | 'track'
+  name       TEXT NOT NULL,     -- folder name or file name, for display
+  path       TEXT,              -- original folder path / source_path (NULL: song wasn't in a folder)
+  song_count INTEGER NOT NULL,
+  size       INTEGER NOT NULL,
+  deleted_at INTEGER NOT NULL   -- unix seconds
+);
+CREATE INDEX IF NOT EXISTS idx_trash_deleted_at ON trash(deleted_at);
+
+CREATE TABLE IF NOT EXISTS trash_rows (
+  trash_id TEXT NOT NULL REFERENCES trash(id),
+  tbl      TEXT NOT NULL,       -- 'tracks' | 'albums' | 'artists' | 'playlist_tracks' | 'starred' | 'folders'
+  data     TEXT NOT NULL        -- JSON object: column -> value
+);
+CREATE INDEX IF NOT EXISTS idx_trash_rows_trash ON trash_rows(trash_id, tbl);
+
+-- Telegram files whose deletion failed (bot lacked "Delete messages", API
+-- error, ...). The daily cron retries them, so a purge never silently leaves
+-- an orphaned message behind.
+CREATE TABLE IF NOT EXISTS pending_deletes (
+  file_ref   TEXT PRIMARY KEY,
+  attempts   INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  created_at INTEGER NOT NULL
+);
