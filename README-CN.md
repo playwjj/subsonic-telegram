@@ -128,6 +128,11 @@ npm run db:migrate:remote
 
 不用折腾自签证书，也不用去找"允许不安全/HTTP"那个开关——Cloudflare 会像给普通网站一样给你的域名签发真实的 TLS 证书，客户端默认的"只走 HTTPS"直接就能用。如果客户端要填 API 版本号，填 `1.16.1`（或选"自动"）就行。
 
+实际跑起来是这样的——现成的 Subsonic 客户端直接连 Worker 浏览播放，不需要装任何定制 App：
+
+![手机 Subsonic 客户端播放](docs/screenshots/mobile-client.jpg)
+![桌面 Subsonic 客户端播放](docs/screenshots/desktop-client.jpg)
+
 想在配客户端之前先确认服务端本身是通的？直接用[部署方式第 7 步](#部署方式cloudflare-git-集成workers-builds)里那条 `curl .../ping.view` 检查命令就行。
 
 ## 准备工作：创建 Telegram Bot 和频道
