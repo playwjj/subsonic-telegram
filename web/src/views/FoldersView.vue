@@ -31,6 +31,7 @@ import FolderTree from "../components/drive/FolderTree.vue";
 import MoveDialog from "../components/drive/MoveDialog.vue";
 import ContextMenu, { type MenuItem } from "../components/drive/ContextMenu.vue";
 import PropertiesDialog from "../components/drive/PropertiesDialog.vue";
+import TagEditorDialog from "../components/TagEditorDialog.vue";
 
 const router = useRouter();
 
@@ -525,6 +526,7 @@ async function download(list: Song[]) {
 
 const playlistDialog = ref<string[] | null>(null);
 const propertiesDialog = ref<{ song?: Song; folder?: FolderDir & { path: string } } | null>(null);
+const tagDialog = ref<{ songs: Song[]; songIds: string[]; folderPaths: string[]; count: number } | null>(null);
 // --- upload: pick files/a folder, or drop them from the OS onto the view ---
 
 const uploadDialog = ref<PickedFile[] | null>(null);
@@ -589,6 +591,24 @@ function onAddedToPlaylist(name: string) {
   notify(`Added to “${name}”`);
 }
 
+// Folders are edited server-side as a whole (however big); their songs are
+// fetched here only to show the current values.
+async function editTags(list: Entry[]) {
+  await attempt(async () => {
+    const songIds = list.flatMap((e) => (e.kind === "song" ? [e.song.id] : []));
+    const folderPaths = list.flatMap((e) => (e.kind === "dir" ? [e.path] : []));
+    const count = list.reduce((n, e) => n + (e.kind === "song" ? 1 : e.dir.songCount), 0);
+    if (!count) return notify("Nothing to edit — no songs selected");
+    tagDialog.value = { songs: await resolveSongs(list), songIds, folderPaths, count };
+  });
+}
+
+function onTagsSaved(updated: number) {
+  tagDialog.value = null;
+  notify(`Updated ${plural(updated, "song")}`);
+  refresh();
+}
+
 function showProperties(entry: Entry) {
   propertiesDialog.value = entry.kind === "song" ? { song: entry.song } : { folder: { ...entry.dir, path: entry.path } };
 }
@@ -613,9 +633,9 @@ function selectionActions(list: Entry[]): MenuItem[] {
       label: "Add to playlist…",
       action: () => attempt(async () => void (playlistDialog.value = (await resolveSongs(list)).map((s) => s.id))),
     },
+    { label: "Edit tags…", separated: true, action: () => editTags(list) },
     {
       label: "Move to…",
-      separated: true,
       action: () => (moveDialog.value = { payload: payloadOf(list), count: list.length }),
     },
     { label: "Rename", disabled: !single, action: () => single && startRename(single) },
@@ -673,6 +693,7 @@ const dialogOpen = computed(
       deleteDialog.value ||
       playlistDialog.value ||
       propertiesDialog.value ||
+      tagDialog.value ||
       uploadDialog.value
     ),
 );
@@ -739,7 +760,10 @@ const columns: { key: SortKey; label: string; class: string }[] = [
       <p v-if="folderTree.loaded" class="mt-2 border-t border-[var(--border)] px-2 pt-2 text-xs text-[var(--text-dim)]">
         {{ folderTree.root.songCount.toLocaleString() }} songs · {{ formatBytes(folderTree.root.size) }}
       </p>
-      <RouterLink :to="{ name: 'trash' }" class="trash-link">🗑 Trash</RouterLink>
+      <div class="sidebar-links">
+        <RouterLink :to="{ name: 'duplicates' }">⧉ Duplicates</RouterLink>
+        <RouterLink :to="{ name: 'trash' }">🗑 Trash</RouterLink>
+      </div>
     </aside>
 
     <section class="min-w-0 flex-1" @contextmenu.self.prevent="openMenu($event)">
@@ -772,7 +796,8 @@ const columns: { key: SortKey; label: string; class: string }[] = [
           title="Shuffle everything in this folder, including subfolders"
           :load="() => getShuffleSongs({ path: currentPath })"
         />
-        <RouterLink :to="{ name: 'trash' }" class="trash-button" title="Trash">🗑</RouterLink>
+        <RouterLink :to="{ name: 'duplicates' }" class="narrow-link" title="Find duplicates">⧉</RouterLink>
+        <RouterLink :to="{ name: 'trash' }" class="narrow-link" title="Trash">🗑</RouterLink>
         <input v-model="query" type="search" class="search ml-auto" placeholder="Search in this folder…" />
         <div class="segmented" role="group" aria-label="View">
           <button :class="{ active: prefs.mode === 'list' }" title="List view" @click="prefs.mode = 'list'">☰</button>
@@ -1069,6 +1094,13 @@ const columns: { key: SortKey; label: string; class: string }[] = [
       :song="propertiesDialog.song"
       :folder="propertiesDialog.folder"
       @close="propertiesDialog = null"
+    />
+
+    <TagEditorDialog
+      v-if="tagDialog"
+      v-bind="tagDialog"
+      @close="tagDialog = null"
+      @saved="onTagsSaved($event.updated)"
     />
 
     <UploadDialog v-if="uploadDialog" :picked="uploadDialog" :folder="currentPath" @close="uploadDialog = null" />
@@ -1382,23 +1414,25 @@ const columns: { key: SortKey; label: string; class: string }[] = [
 }
 
 /* Pinned to the bottom of the (scrolling) sidebar so a long tree can't
-   push it out of sight. */
-.trash-link {
+   push them out of sight. */
+.sidebar-links {
   position: sticky;
   bottom: -0.4rem;
-  display: flex;
-  gap: 0.35rem;
   margin-top: 0.4rem;
-  padding: 0.45rem 0.4rem 0.45rem 1.5rem;
   border-top: 1px solid var(--border);
-  font-size: 0.875rem;
   background: rgb(26, 29, 36);
 }
-.trash-link:hover {
+.sidebar-links a {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.45rem 0.4rem 0.45rem 1.5rem;
+  font-size: 0.875rem;
+}
+.sidebar-links a:hover {
   background: rgba(255, 255, 255, 0.05);
 }
-/* The sidebar (and its Trash link) is hidden on narrow screens. */
-.trash-button {
+/* The sidebar (and its links) is hidden on narrow screens. */
+.narrow-link {
   display: none;
   padding: 0.4rem 0.6rem;
   border: 1px solid var(--border);
@@ -1406,7 +1440,7 @@ const columns: { key: SortKey; label: string; class: string }[] = [
   background: var(--surface);
 }
 @media (max-width: 1023px) {
-  .trash-button {
+  .narrow-link {
     display: block;
   }
 }

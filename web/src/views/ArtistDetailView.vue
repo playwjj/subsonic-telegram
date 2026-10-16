@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import { getArtist, getShuffleSongs, coverArtUrl, type ArtistDetail } from "../api/subsonic";
+import { getArtist, getShuffleSongs, coverArtUrl, setCoverArt, type ArtistDetail } from "../api/subsonic";
+import { prepareCover } from "../utils/image";
 import ShuffleButton from "../components/ShuffleButton.vue";
 
 const props = defineProps<{ id: string }>();
@@ -17,6 +18,25 @@ async function load(id: string) {
   }
 }
 watch(() => props.id, load, { immediate: true });
+
+// The artist's own photo (shown instead of one of their album covers).
+const photoInput = ref<HTMLInputElement | null>(null);
+const uploadingPhoto = ref(false);
+async function onPhotoPicked(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file || !artist.value) return;
+  uploadingPhoto.value = true;
+  error.value = "";
+  try {
+    await setCoverArt(artist.value.id, await prepareCover(file));
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    uploadingPhoto.value = false;
+  }
+}
 </script>
 
 <template>
@@ -25,7 +45,12 @@ watch(() => props.id, load, { immediate: true });
       <img v-if="artist.coverArt" :src="coverArtUrl(artist.coverArt)" :alt="`${artist.name} cover`" />
       <h1>{{ artist.name }}</h1>
       <ShuffleButton class="ml-auto" :load="() => getShuffleSongs({ artistId: artist!.id })" />
+      <button class="inline-flex items-center gap-2 text-sm" :disabled="uploadingPhoto" @click="photoInput?.click()">
+        <span v-if="uploadingPhoto" class="spinner"></span> Change photo…
+      </button>
+      <input ref="photoInput" type="file" accept="image/*" hidden @change="onPhotoPicked" />
     </div>
+    <p v-if="error" class="error mt-2 text-sm">{{ error }}</p>
     <div class="albums">
       <RouterLink
         v-for="al in artist.album"

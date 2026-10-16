@@ -4,6 +4,7 @@ import { getSongs, getShuffleSongs, deleteTrack, type Song, type SongSort } from
 import ShuffleButton from "../components/ShuffleButton.vue";
 import { playQueue } from "../stores/player";
 import TrackRow from "../components/TrackRow.vue";
+import TagEditorDialog from "../components/TagEditorDialog.vue";
 
 const PAGE_SIZE = 50;
 
@@ -12,6 +13,7 @@ const total = ref(0);
 const page = ref(0);
 const sort = ref<SongSort>("recent");
 const loading = ref(true);
+const editing = ref<Song | null>(null);
 
 async function load() {
   loading.value = true;
@@ -58,10 +60,20 @@ async function handleDelete(song: Song) {
         :key="song.id"
         :song="song"
         deletable
+        editable
         @play="playQueue(songs, i)"
         @delete="handleDelete(song)"
+        @edit="editing = song"
       />
     </div>
+    <TagEditorDialog
+      v-if="editing"
+      :songs="[editing]"
+      :song-ids="[editing.id]"
+      :count="1"
+      @close="editing = null"
+      @saved="(editing = null), load()"
+    />
 
     <div v-if="total > PAGE_SIZE" class="mt-4 flex items-center justify-center gap-3 text-sm">
       <button :disabled="page === 0" @click="page--">← Prev</button>

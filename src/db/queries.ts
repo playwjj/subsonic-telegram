@@ -899,19 +899,32 @@ export async function getTracksForDelete(db: D1Database, trackIds: string[]): Pr
 export function cascadeDeleteStatements(db: D1Database, rows: TrackDeleteRow[]): D1PreparedStatement[] {
   if (!rows.length) return [];
   const ids = JSON.stringify(rows.map((r) => r.id));
-  const albumIds = JSON.stringify([...new Set(rows.map((r) => r.album_id))]);
-  const artistIds = JSON.stringify([...new Set(rows.map((r) => r.artist_id))]);
-  const emptyAlbums = `SELECT value FROM json_each(?) WHERE NOT EXISTS (SELECT 1 FROM tracks WHERE album_id = value)`;
-  const emptyArtists = `SELECT value FROM json_each(?) WHERE NOT EXISTS (SELECT 1 FROM albums WHERE artist_id = value)
-    AND NOT EXISTS (SELECT 1 FROM tracks WHERE artist_id = value)`;
   return [
     db.prepare(`DELETE FROM playlist_tracks WHERE track_id IN (SELECT value FROM json_each(?))`).bind(ids),
     db.prepare(`DELETE FROM starred WHERE item_type = 'track' AND item_id IN (SELECT value FROM json_each(?))`).bind(ids),
     db.prepare(`DELETE FROM tracks WHERE id IN (SELECT value FROM json_each(?))`).bind(ids),
-    db.prepare(`DELETE FROM starred WHERE item_type = 'album' AND item_id IN (${emptyAlbums})`).bind(albumIds),
-    db.prepare(`DELETE FROM albums WHERE id IN (${emptyAlbums})`).bind(albumIds),
-    db.prepare(`DELETE FROM starred WHERE item_type = 'artist' AND item_id IN (${emptyArtists})`).bind(artistIds),
-    db.prepare(`DELETE FROM artists WHERE id IN (${emptyArtists})`).bind(artistIds),
+    ...pruneEmptyStatements(
+      db,
+      rows.map((r) => r.album_id),
+      rows.map((r) => r.artist_id),
+    ),
+  ];
+}
+
+// Of the given albums and artists, deletes the ones left with nothing in
+// them (and their stars) — after a delete, or after a tag edit moved songs
+// to another album/artist. Same json_each batching as above.
+export function pruneEmptyStatements(db: D1Database, albumIds: string[], artistIds: string[]): D1PreparedStatement[] {
+  const albums = JSON.stringify([...new Set(albumIds)]);
+  const artists = JSON.stringify([...new Set(artistIds)]);
+  const emptyAlbums = `SELECT value FROM json_each(?) WHERE NOT EXISTS (SELECT 1 FROM tracks WHERE album_id = value)`;
+  const emptyArtists = `SELECT value FROM json_each(?) WHERE NOT EXISTS (SELECT 1 FROM albums WHERE artist_id = value)
+    AND NOT EXISTS (SELECT 1 FROM tracks WHERE artist_id = value)`;
+  return [
+    db.prepare(`DELETE FROM starred WHERE item_type = 'album' AND item_id IN (${emptyAlbums})`).bind(albums),
+    db.prepare(`DELETE FROM albums WHERE id IN (${emptyAlbums})`).bind(albums),
+    db.prepare(`DELETE FROM starred WHERE item_type = 'artist' AND item_id IN (${emptyArtists})`).bind(artists),
+    db.prepare(`DELETE FROM artists WHERE id IN (${emptyArtists})`).bind(artists),
   ];
 }
 
@@ -1005,4 +1018,23 @@ export function setTrackPathsStatement(db: D1Database, moves: { id: string; path
        WHERE id IN (SELECT json_extract(value, '$.id') FROM json_each(?1))`,
     )
     .bind(JSON.stringify(moves));
+}
+
+// Tracks that have at least one likely duplicate, ordered so duplicates sit
+// next to each other: by "tags" (same title, ignoring case and surrounding
+// spaces, by the same artist — getDuplicates then splits those by
+// duration), or by "size" (same byte size and format: almost certainly
+// the very same file uploaded twice).
+export async function listDuplicateTracks(db: D1Database, mode: "tags" | "size"): Promise<TrackRow[]> {
+  const sql =
+    mode === "size"
+      ? `${TRACK_SELECT}
+         WHERE (t.size, t.suffix) IN (SELECT size, suffix FROM tracks GROUP BY size, suffix HAVING COUNT(*) > 1)
+         ORDER BY t.size DESC, t.suffix, t.created_at`
+      : `${TRACK_SELECT}
+         WHERE (lower(trim(t.title)), t.artist_id) IN
+           (SELECT lower(trim(title)), artist_id FROM tracks GROUP BY 1, 2 HAVING COUNT(*) > 1)
+         ORDER BY lower(trim(t.title)), t.artist_id, t.duration, t.created_at`;
+  const { results } = await db.prepare(sql).all<TrackRow>();
+  return results;
 }

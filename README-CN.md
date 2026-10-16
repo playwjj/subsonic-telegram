@@ -241,7 +241,7 @@ npm run fix-covers -- --artist-photos [--limit=N] [--dry-run] [--retry-failed]
 
 **播放器**：支持随机播放（播放条上的 🔀 是对当前队列的开关；各处的「🔀 Shuffle」按钮则直接打乱一组歌开始播——专辑、歌单（详情页和歌单列表的每一行）、艺人、文件夹（含子文件夹）、收藏、Songs 页（「Shuffle all」，整个曲库），以及首页 Random Songs 旁边的「Shuffle library」。艺人/文件夹/整个曲库这几个通过本项目自己的 `getShuffleSongs` 接口均匀随机抽最多 500 首；关掉随机会恢复原顺序）、循环（关/列表/单曲）和音量调节（随机/循环/音量设置存在 `localStorage`）。播放队列会通过 `savePlayQueue` 同步到服务端，打开页面时用 `getPlayQueue` 恢复到上次的歌和进度（暂停状态），刷新页面或者从别的 Subsonic 客户端过来都能续播；因为所有 id 都要拼进 URL 查询参数，只保存当前曲目前后共 200 首的窗口。手机上（≤600px）播放条会分成两行——封面/歌名/播放控制一行，进度条和歌词/队列按钮一行——并隐藏星级评分和音量条。锁屏/通知栏控制和键盘媒体键走的是 Media Session API。播放条上的 ☰ 打开播放队列（点任意一首跳过去播、移除单首或清空队列）；每一行歌曲的 ⋯ 菜单里有「Play next」（下一首播放）和「Add to queue」（加到队列末尾）。
 
-**Folders 是什么**：按 `source_path`（`npm run import` 记录的、相对导入根目录的路径）还原出原始文件夹树，跟 Artists 那种按 ID3 标签分组的浏览方式并列存在。对那些"合集"文件夹（比如按月份存的热歌榜）特别有用——这类文件夹里每首歌的 ID3 艺人标签都不一样，按 Artists 浏览会被打散到几十上百个艺人名下，按 Folders 浏览则完全保留原来"一个文件夹一份合集"的样子。对应的后端接口是 `getFolder`、`getFolderTree`、`getFolderSongs`、`moveItems`、`renameTrackFile`、`deleteItems`、`getTrackStorage`、`getTrash`、`restoreTrash`、`purgeTrash` 等（逻辑在 `src/subsonic/folders.ts` 和 `src/subsonic/trash.ts`），跟 `getLibraryStats`/`getSongs`/`getRecentlyPlayed`/`getMostPlayed` 一样，都不是 Subsonic 官方协议的一部分，只服务于这个项目自己的 Web UI。
+**Folders 是什么**：按 `source_path`（`npm run import` 记录的、相对导入根目录的路径）还原出原始文件夹树，跟 Artists 那种按 ID3 标签分组的浏览方式并列存在。对那些"合集"文件夹（比如按月份存的热歌榜）特别有用——这类文件夹里每首歌的 ID3 艺人标签都不一样，按 Artists 浏览会被打散到几十上百个艺人名下，按 Folders 浏览则完全保留原来"一个文件夹一份合集"的样子。对应的后端接口是 `getFolder`、`getFolderTree`、`getFolderSongs`、`moveItems`、`renameTrackFile`、`deleteItems`、`getTrackStorage`、`getTrash`、`restoreTrash`、`purgeTrash`、`updateTracks`、`setCoverArt`、`getDuplicates` 等（逻辑在 `src/subsonic/folders.ts`、`src/subsonic/trash.ts` 和 `src/subsonic/metadata.ts`），跟 `getLibraryStats`/`getSongs`/`getRecentlyPlayed`/`getMostPlayed` 一样，都不是 Subsonic 官方协议的一部分，只服务于这个项目自己的 Web UI。
 
 ### 从 Web UI 管理歌库
 
@@ -251,7 +251,7 @@ npm run fix-covers -- --artist-photos [--limit=N] [--dry-run] [--retry-failed]
 - Telegram 每个频道大约每分钟只接受 20 次上传。遇到 429 时，`uploadTrack` 会把 Telegram 给出的 `retryAfter` 传回前端，队列会暂停这么久（面板上有倒计时）再继续——所以大批量上传只是需要多花点时间。
 - 文件会先传到 Telegram，成功后才写 D1，所以上传失败不会留下没有歌曲的空艺人或空专辑。跟另一个文件夹里某首歌同名、同专辑的文件，会得到自己独立的 id，不会被误认成那首歌。
 - 跟 `npm run import` 一样是 19MB 上限（Telegram `getFile` 的下载限制）——超过这个大小的文件即使传上去了也永远放不回来，所以前端和后端都会拒绝。
-- 不上传封面——这样建出来的新专辑没有封面，跟任何 `cover_ref` 为空的专辑一样。
+- 上传歌曲时不带封面——这样建出来的新专辑在手动加封面之前没有封面（见下面的「编辑标签和封面」）。
 - **删除歌曲**（Songs/Album 列表行上的 🗑 按钮——playlist 和搜索结果视图没有这个按钮，它们各自已经有语义不同的"从歌单移除"/什么都没有）会把这首歌移进回收站（见下文）。
 
 **Folders 页面是一个网盘式的文件管理器**：
@@ -270,6 +270,10 @@ npm run fix-covers -- --artist-photos [--limit=N] [--dry-run] [--retry-failed]
 **回收站**：在 Web UI 里删除的东西会进回收站（Folders 侧栏底部的 🗑 Trash，窄屏上是 Folders 工具栏里的 🗑 按钮），而不是直接删除。删除一个文件夹是一条回收站记录，包含它下面的所有内容；单独删除的每首歌各是一条记录。这些行会从正常的表里移走，所以回收站里的歌会立刻从所有页面和第三方客户端里消失，但 Telegram 那边暂时不动。**还原**会把歌曲连同一起删掉的东西都放回去：因此变空而被删掉的专辑和艺人、收藏、文件夹登记，以及歌单条目（原位置还空着就放回原位置，否则放到歌单末尾）。如果原来的文件名在这期间被占用了，还原后会叫 `name (1).mp3`。**永久删除**（单条，或「Empty trash」清空）会用 `deleteMessages` 删除 Telegram 文件，每次 100 条；特别大的清空会拆成几次请求完成。超过 `TRASH_RETENTION_DAYS`（`[vars]` 里的设置，默认 30 天）的记录由每天一次的 Cron Trigger 自动清理（`wrangler.toml` 的 `[triggers]`，`src/index.ts` 的 `scheduled()`）。Telegram 删除失败时（比如 bot 没有「删除消息」权限），会记到 `pending_deletes` 表里，由同一个定时任务重试，而不是留下孤儿消息；回收站页面会显示还有多少条在等待重试。
 
 回收站、重试队列和它们的索引都是 `CREATE TABLE IF NOT EXISTS`，所以对已有数据库跑一次 `npm run db:migrate:remote` 就能加上。
+
+**编辑标签和封面**：入口有 Folders 菜单里的「Edit tags…」（歌曲和文件夹可以混选，选文件夹等于选它下面的所有歌）、Songs/Album 列表行上的 ✎ 按钮，以及专辑页的「✎ Edit」（专辑名、专辑艺人、年份、流派、封面）。这些只改 D1 里的歌库信息，Telegram 里的音频文件不会被改写。歌曲 id 不变，所以收藏、评分、播放次数和歌单都不受影响。改艺人或专辑时，歌曲会移到同名的专辑里——跟带这些标签上传时会进的是同一个专辑，所以改成一个已有专辑的名字就等于合并进去；因此变空的专辑和艺人会被删掉，它们的收藏会跟着歌曲转过去。年份和流派是存在专辑上的，所以会作用于整张专辑。新封面（或者在艺人页换的艺人照片）会先在浏览器里缩到最长边 1200px 以内，再存进 Telegram；旧图片如果没有别的地方在用（包括回收站里的记录），会从 Telegram 删掉。
+
+**查找重复**（Folders 侧栏的 ⧉ Duplicates）：按「标题和艺人相同、时长相差 3 秒以内」或者「文件大小和格式完全相同」分组。每组第一首是建议保留的那首——优先收藏过的，其次是评分、码率、文件大小、播放次数更高的。点「Select all but the suggested」再一键就能把其余的移进回收站，可以撤销。
 
 **升级已有数据库**（在 `dir` 列出现之前建的库）需要在部署前执行一次下面的命令，然后照常跑 `npm run db:migrate:remote` 建索引：
 

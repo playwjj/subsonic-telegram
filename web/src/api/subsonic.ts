@@ -1,6 +1,7 @@
 // Thin client for this project's Subsonic REST API. Every call attaches the
 // credentials stored by stores/auth.ts as query params — same model any
 // Subsonic client uses, just from a browser instead of a native app.
+import { reactive } from "vue";
 import { getCredentials, setCredentials } from "../stores/auth";
 
 const CLIENT_NAME = "subsonic-telegram-web";
@@ -78,8 +79,12 @@ export function downloadUrl(id: string): string {
   return buildUrl("download", { id });
 }
 
+// Bumped per id when its cover changes (setCoverArt), so every <img> showing
+// it reloads instead of keeping the image it already has for that URL.
+const coverVersions = reactive<Record<string, number>>({});
+
 export function coverArtUrl(id: string): string {
-  return buildUrl("getCoverArt", { id });
+  return buildUrl("getCoverArt", { id, v: coverVersions[id] });
 }
 
 export async function login(username: string, password: string): Promise<void> {
@@ -588,4 +593,51 @@ export async function renameFolder(path: string, name: string): Promise<void> {
 
 export async function createFolder(parentPath: string, name: string): Promise<void> {
   await call("createFolder", { path: parentPath, name });
+}
+
+// --- tags, covers, duplicates (src/subsonic/metadata.ts) ---
+
+// Only the fields present are changed. null clears year/genre/track/disc.
+// Year and genre belong to the album, so they change for its other songs too.
+export interface TagEdits {
+  title?: string;
+  artist?: string;
+  album?: string;
+  year?: number | null;
+  genre?: string | null;
+  track?: number | null;
+  disc?: number | null;
+}
+
+// Songs by id, and/or everything under folders. Returns how many songs
+// changed and the album(s) they're in now.
+export async function updateTracks(
+  target: { songIds?: string[]; folderPaths?: string[] },
+  edits: TagEdits,
+): Promise<{ updated: number; albumIds: string[] }> {
+  const params: Params = { id: target.songIds, path: target.folderPaths };
+  for (const [key, value] of Object.entries(edits)) {
+    if (value !== undefined) params[key] = value === null ? "" : value;
+  }
+  const body = await callPost<{ updateResult: { updated: number; album?: { id: string }[] } }>("updateTracks", params);
+  return { updated: body.updateResult.updated, albumIds: (body.updateResult.album ?? []).map((a) => a.id) };
+}
+
+// An album's cover or an artist's photo: a new image, or null to remove it.
+export async function setCoverArt(id: string, image: Blob | null): Promise<void> {
+  const search = buildSearch({ id, remove: image ? undefined : "true" }, getCredentials());
+  const res = await fetch(`/rest/setCoverArt.view?${search.toString()}`, {
+    method: "POST",
+    headers: image ? { "Content-Type": image.type } : undefined,
+    body: image ?? undefined,
+  });
+  await parseResponse(res);
+  coverVersions[id] = (coverVersions[id] ?? 0) + 1;
+}
+
+export type DuplicateMode = "tags" | "size";
+
+export async function getDuplicates(mode: DuplicateMode): Promise<Song[][]> {
+  const body = await call<{ duplicates: { group?: { song: Song[] }[] } }>("getDuplicates", { mode });
+  return (body.duplicates.group ?? []).map((g) => g.song);
 }

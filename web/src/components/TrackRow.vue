@@ -9,8 +9,8 @@ import StarRating from "./StarRating.vue";
 // delete (to trash) button, but derived views like a playlist or search
 // results don't — a playlist already has its own "remove from playlist"
 // action (updatePlaylist), which is a different, much less destructive thing.
-const props = defineProps<{ song: Song; deletable?: boolean }>();
-const emit = defineEmits<{ play: []; delete: [] }>();
+const props = defineProps<{ song: Song; deletable?: boolean; editable?: boolean }>();
+const emit = defineEmits<{ play: []; delete: []; edit: [] }>();
 
 const starred = computed(() => !!props.song.starred);
 
@@ -62,6 +62,7 @@ function formatDuration(sec?: number): string {
     </button>
     <QueueMenu :song="song" />
     <AddToPlaylistMenu :song-id="song.id" />
+    <button v-if="editable" class="delete-btn" title="Edit tags" @click="emit('edit')">✎</button>
     <button v-if="deletable" class="delete-btn" title="Move to trash" @click="emit('delete')">🗑</button>
   </div>
 </template>

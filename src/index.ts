@@ -15,6 +15,7 @@ import * as browsing from "./subsonic/browsing";
 import * as media from "./subsonic/media";
 import * as folders from "./subsonic/folders";
 import * as trash from "./subsonic/trash";
+import * as metadata from "./subsonic/metadata";
 import * as q from "./db/queries";
 import { fetchLyrics, fetchStructuredLyrics } from "./lyrics";
 import { TelegramStorage, TelegramRateLimitError } from "./storage/telegram";
@@ -109,11 +110,13 @@ export default {
     // POSTed form fields count as params too (OpenSubsonic "formPost"): the
     // web UI's multi-select actions send hundreds of ids, more than fits in a
     // URL. uploadTrack's body is always the raw file, whatever Content-Type
-    // the client put on it (curl, for one, defaults to form-urlencoded).
+    // the client put on it (curl, for one, defaults to form-urlencoded) —
+    // same for setCoverArt's image.
     const params = new URLSearchParams(url.search);
     if (
       request.method === "POST" &&
       endpoint !== "uploadTrack" &&
+      endpoint !== "setCoverArt" &&
       request.headers.get("Content-Type")?.startsWith("application/x-www-form-urlencoded")
     ) {
       for (const [key, value] of new URLSearchParams(await request.text())) params.append(key, value);
@@ -932,11 +935,89 @@ export default {
         return respond(subsonicSuccess(node("folder", { path: newPath })), format);
       }
 
+      // Edits tags of songs (id) and/or everything under folders (path).
+      // Only the fields present are changed; an empty year/genre/track/disc
+      // clears it. See src/subsonic/metadata.ts.
+      case "updateTracks": {
+        const ids = params.getAll("id");
+        const paths = params.getAll("path");
+        if (!ids.length && !paths.length) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id or path"), format);
+        const edits = metadata.parseTagEdits(params);
+        if (!Object.keys(edits).length) return respond(subsonicError(ERR.MISSING_PARAM, "Nothing to change"), format);
+        const result = await metadata.updateTracks(env.DB, ids, paths, edits);
+        return respond(
+          subsonicSuccess(
+            node(
+              "updateResult",
+              { updated: result.updated },
+              { lists: { album: result.albumIds.map((id) => node("album", { id })) } },
+            ),
+          ),
+          format,
+        );
+      }
+
+      // Replaces an album's cover (or an artist's photo) with the image in
+      // the request body, or removes it with remove=true.
+      case "setCoverArt": {
+        const id = params.get("id");
+        if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
+        let image: { bytes: Uint8Array; contentType: string } | null = null;
+        if (params.get("remove") !== "true") {
+          const contentType = request.headers.get("Content-Type") ?? "";
+          if (!contentType.startsWith("image/")) return respond(subsonicError(0, "Not an image"), format);
+          const bytes = new Uint8Array(await request.arrayBuffer());
+          if (!bytes.byteLength) return respond(subsonicError(0, "Empty image"), format);
+          if (bytes.byteLength > metadata.MAX_COVER_BYTES) {
+            return respond(subsonicError(0, "Image too large (max 10 MB)"), format);
+          }
+          image = { bytes, contentType };
+        }
+        try {
+          const kind = await metadata.setCoverArt(env.DB, storage, id, image);
+          return respond(subsonicSuccess(node("coverArt", { id, kind })), format);
+        } catch (err) {
+          if (err instanceof TelegramRateLimitError) {
+            return respond(subsonicError(0, err.message, { retryAfter: err.retryAfter }), format);
+          }
+          throw err;
+        }
+      }
+
+      // Groups of likely duplicate songs: mode=tags (same title and artist,
+      // similar length) or mode=size (same size and format).
+      case "getDuplicates": {
+        const mode = params.get("mode") === "size" ? "size" : "tags";
+        const [groups, starred] = await Promise.all([
+          metadata.findDuplicates(env.DB, mode),
+          q.getStarredIds(env.DB, auth.username),
+        ]);
+        return respond(
+          subsonicSuccess(
+            node(
+              "duplicates",
+              { mode },
+              {
+                lists: {
+                  group: groups.map((tracks) =>
+                    node("group", undefined, {
+                      lists: { song: tracks.map((t) => songNode(t, { starredAt: starred.tracks.get(t.id) })) },
+                    }),
+                  ),
+                },
+              },
+            ),
+          ),
+          format,
+        );
+      }
+
       default:
         return respond(subsonicError(0, `Unsupported endpoint: ${endpoint}`), format);
       }
     } catch (err) {
       if (err instanceof folders.FolderError) return respond(subsonicError(err.code, err.message), format);
+      if (err instanceof metadata.MetadataError) return respond(subsonicError(0, err.message), format);
       // Surface the real D1/storage error as a Subsonic error response
       // instead of letting it propagate as an uncaught exception — Workers
       // then returns a bare, non-JSON 500 that every client (this web UI,
