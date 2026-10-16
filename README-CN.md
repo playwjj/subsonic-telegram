@@ -1,4 +1,6 @@
-# Subsonic Telegram
+<p align="center"><img src="web/src/assets/logo.svg" width="128" alt="Subsonic Telegram logo"></p>
+
+<h1 align="center">Subsonic Telegram</h1>
 
 *[English](README.md) | 中文*
 

@@ -2,6 +2,7 @@
 import { useRoute, useRouter } from "vue-router";
 import { isLoggedIn, logout } from "./stores/auth";
 import { playerState, currentTrack } from "./stores/player";
+import AppLogo from "./components/AppLogo.vue";
 import PlayerBar from "./components/PlayerBar.vue";
 import UploadPanel from "./components/upload/UploadPanel.vue";
 
@@ -46,6 +47,10 @@ async function handleLogout() {
       v-if="isLoggedIn() && route.name !== 'login'"
       class="glass sticky top-0 z-20 mx-3 mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl px-4 py-3 sm:mx-4"
     >
+      <RouterLink to="/" class="-my-1 mr-1 flex items-center gap-2 text-sm font-semibold text-[var(--text)]" title="Subsonic Telegram">
+        <AppLogo class="h-7 w-7" :spinning="playerState.isPlaying" />
+        <span class="max-[600px]:hidden">Subsonic Telegram</span>
+      </RouterLink>
       <RouterLink
         v-for="link in navLinks"
         :key="link.to"

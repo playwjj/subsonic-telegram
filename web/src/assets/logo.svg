@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Subsonic Telegram logo: the full-screen player's cassette player, simplified -->
+  <defs>
+    <linearGradient id="logo-metal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f5f7"/>
+      <stop offset="0.25" stop-color="#d5d8de"/>
+      <stop offset="0.7" stop-color="#a9aeb7"/>
+      <stop offset="1" stop-color="#868b95"/>
+    </linearGradient>
+    <linearGradient id="logo-side" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5d626b"/>
+      <stop offset="1" stop-color="#34373d"/>
+    </linearGradient>
+    <linearGradient id="logo-key" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff"/>
+      <stop offset="1" stop-color="#b3b7bf"/>
+    </linearGradient>
+    <linearGradient id="logo-shell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a3d45"/>
+      <stop offset="1" stop-color="#1b1d22"/>
+    </linearGradient>
+    <linearGradient id="logo-paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#faf5e9"/>
+      <stop offset="1" stop-color="#e9dfc8"/>
+    </linearGradient>
+    <radialGradient id="logo-led" cx="0.4" cy="0.35">
+      <stop offset="0" stop-color="#e6fff0"/>
+      <stop offset="0.45" stop-color="#4dff88"/>
+      <stop offset="1" stop-color="#119140"/>
+    </radialGradient>
+  </defs>
+
+  <!-- transport keys -->
+  <g>
+    <rect x="22" y="12" width="24" height="16" rx="3" fill="#6b7079"/>
+    <rect x="22" y="9" width="24" height="16" rx="3" fill="url(#logo-key)" stroke="#8a8f98" stroke-width="0.75"/>
+    <rect x="52" y="12" width="24" height="16" rx="3" fill="#6b7079"/>
+    <rect x="52" y="11" width="24" height="16" rx="3" fill="url(#logo-key)" stroke="#8a8f98" stroke-width="0.75"/>
+    <rect x="82" y="12" width="24" height="16" rx="3" fill="#6b7079"/>
+    <rect x="82" y="9" width="24" height="16" rx="3" fill="url(#logo-key)" stroke="#8a8f98" stroke-width="0.75"/>
+  </g>
+
+  <!-- body: thickness, metal face, bevel -->
+  <rect x="6" y="24" width="116" height="96" rx="14" fill="url(#logo-side)"/>
+  <rect x="6" y="19" width="116" height="96" rx="14" fill="url(#logo-metal)"/>
+  <rect x="7" y="20" width="114" height="94" rx="13" fill="none" stroke="#fff" stroke-opacity="0.7" stroke-width="1.5"/>
+
+  <!-- lid -->
+  <rect x="15" y="28" width="98" height="68" rx="8" fill="#0c0d11"/>
+
+  <!-- cassette -->
+  <rect x="21" y="33" width="86" height="60" rx="5" fill="url(#logo-shell)"/>
+  <rect x="26" y="37" width="76" height="38" rx="3" fill="url(#logo-paper)"/>
+  <rect x="26" y="61" width="76" height="3" fill="#d9482b"/>
+  <rect x="26" y="64" width="76" height="3" fill="#ec7f2e"/>
+  <rect x="26" y="67" width="76" height="3" fill="#f2b33d"/>
+  <rect x="26" y="70" width="76" height="3" fill="#f5d469"/>
+  <rect x="32" y="42" width="40" height="3" rx="1.5" fill="#c0392b"/>
+  <rect x="32" y="48" width="56" height="2" rx="1" fill="#cdbf9f"/>
+  <rect x="38" y="53" width="52" height="18" rx="9" fill="#08080a"/>
+  <circle cx="51" cy="62" r="7.5" fill="#4a3426"/>
+  <circle cx="77" cy="62" r="5" fill="#4a3426"/>
+  <g transform="translate(51 62)"><g class="reel">
+    <circle r="4.5" fill="#f4efe3"/>
+    <path d="M0-4.5V-2.6M3.9 2.25 2.25 1.3M-3.9 2.25-2.25 1.3" stroke="#3a3d44" stroke-width="1.4"/>
+    <circle r="1.6" fill="#25282f"/>
+  </g></g>
+  <g transform="translate(77 62)"><g class="reel">
+    <circle r="4.5" fill="#f4efe3"/>
+    <path d="M0-4.5V-2.6M3.9 2.25 2.25 1.3M-3.9 2.25-2.25 1.3" stroke="#3a3d44" stroke-width="1.4"/>
+    <circle r="1.6" fill="#25282f"/>
+  </g></g>
+  <path d="M40 93 L44 82 L84 82 L88 93 Z" fill="#2c2f36"/>
+
+  <!-- play light -->
+  <circle cx="106" cy="105" r="4.5" fill="#6b7079"/>
+  <circle cx="106" cy="105" r="3" fill="url(#logo-led)"/>
+  <rect x="16" y="103" width="40" height="3" rx="1.5" fill="#5d626b" fill-opacity="0.55"/>
+</svg>

@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { login, SubsonicError } from "../api/subsonic";
+import AppLogo from "../components/AppLogo.vue";
 
 const username = ref("");
 const password = ref("");
@@ -28,6 +29,7 @@ async function handleSubmit() {
 <template>
   <div class="login">
     <div class="card">
+      <AppLogo class="logo" />
       <h1>Subsonic Telegram</h1>
       <form @submit.prevent="handleSubmit">
         <input v-model="username" placeholder="Username" autocomplete="username" required />
@@ -50,6 +52,13 @@ async function handleSubmit() {
   width: 100%;
   max-width: 20rem;
   padding: 2rem;
+}
+.logo {
+  display: block;
+  width: 7rem;
+  height: 7rem;
+  margin: 0 auto 1rem;
+  filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.45));
 }
 h1 {
   font-size: 1.4rem;
