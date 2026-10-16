@@ -129,9 +129,10 @@ This is the whole point of the project, worth calling out explicitly: this Worke
 
 No self-signed certificate hassle and no "allow insecure/HTTP" toggle to flip — Cloudflare issues a real TLS certificate for your domain like any other site, so every client's default HTTPS-only mode just works. If a client asks for an API version, `1.16.1` (or "auto") is fine.
 
-In practice it looks like this — a stock mobile Subsonic client browsing and playing straight from the Worker, no custom app needed:
+In practice it looks like this — stock Subsonic clients browsing and playing straight from the Worker, no custom app needed:
 
 ![Mobile Subsonic client playing from the server](docs/screenshots/mobile-client.jpg)
+![Desktop Subsonic client playing from the server](docs/screenshots/desktop-client.jpg)
 
 Want to check the server itself before pointing a client at it? That's exactly what the `curl .../ping.view` check in [Deployment step 7](#deployment-cloudflare-git-integration-workers-builds) is for.
 
