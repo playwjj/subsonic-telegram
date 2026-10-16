@@ -19,6 +19,14 @@ export function formatDuration(sec?: number): string {
     .padStart(2, "0")}`;
 }
 
+// Playback position ("1:05"); "0:00" until the duration is known.
+export function formatTime(sec: number): string {
+  if (!Number.isFinite(sec)) return "0:00";
+  return `${Math.floor(sec / 60)}:${Math.floor(sec % 60)
+    .toString()
+    .padStart(2, "0")}`;
+}
+
 export function formatDate(iso?: string): string {
   return iso ? new Date(iso).toLocaleDateString() : "";
 }

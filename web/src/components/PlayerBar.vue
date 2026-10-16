@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref } from "vue";
 import {
   playerState,
   currentTrack,
@@ -11,13 +11,16 @@ import {
   cycleRepeat,
   setVolume,
   restoreQueue,
-  jumpTo,
-  removeFromQueue,
-  clearQueue,
+  toggleCurrentStar,
+  setView,
+  closePlayer,
 } from "../stores/player";
-import { coverArtUrl, star, unstar, getLyrics } from "../api/subsonic";
+import { coverArtUrl } from "../api/subsonic";
+import { formatTime } from "../utils/format";
 import StarRating from "./StarRating.vue";
-import Modal from "./Modal.vue";
+import QueueModal from "./QueueModal.vue";
+import FullPlayer from "./FullPlayer.vue";
+import MiniPlayer from "./MiniPlayer.vue";
 
 function onSeek(e: Event) {
   seek(Number((e.target as HTMLInputElement).value));
@@ -39,18 +42,6 @@ function toggleMute() {
 }
 
 const showQueue = ref(false);
-const queueList = ref<HTMLElement | null>(null);
-
-async function openQueue() {
-  showQueue.value = true;
-  await nextTick();
-  queueList.value?.querySelector(".queue-item.current")?.scrollIntoView({ block: "center" });
-}
-
-function handleClearQueue() {
-  showQueue.value = false;
-  clearQueue();
-}
 
 const repeatTitle = computed(
   () => ({ off: "Repeat: off", all: "Repeat: all", one: "Repeat: one" })[playerState.repeat],
@@ -63,152 +54,80 @@ onMounted(() => {
 });
 
 const starred = computed(() => !!currentTrack.value?.starred);
-
-const showLyrics = ref(false);
-const lyricsState = ref<"loading" | "found" | "empty" | "error">("loading");
-const lyricsText = ref("");
-
-async function loadLyrics() {
-  const track = currentTrack.value;
-  if (!track) return;
-  lyricsState.value = "loading";
-  try {
-    const lyrics = await getLyrics(track.artist, track.title);
-    lyricsText.value = lyrics.value ?? "";
-    lyricsState.value = lyrics.value ? "found" : "empty";
-  } catch {
-    lyricsState.value = "error";
-  }
-}
-
-function openLyrics() {
-  showLyrics.value = true;
-  loadLyrics();
-}
-
-// Keep showing lyrics through track changes (e.g. a queue playing through)
-// rather than silently going stale — but only while the panel is open, so
-// switching tracks never fires an LRCLIB request the user hasn't asked for.
-watch(currentTrack, () => {
-  if (showLyrics.value) loadLyrics();
-});
-
-// Mutates the shared Song object (not a local copy) — currentTrack is the
-// same reactive object the track's list row renders, so this keeps both in
-// sync without a round-trip re-fetch.
-async function toggleStar() {
-  const track = currentTrack.value;
-  if (!track) return;
-  const nextStarred = !starred.value;
-  const prevStarred = track.starred;
-  track.starred = nextStarred ? new Date().toISOString() : undefined; // optimistic
-  try {
-    await (nextStarred ? star(track.id) : unstar(track.id));
-  } catch {
-    track.starred = prevStarred;
-  }
-}
-
-function formatTime(sec: number): string {
-  if (!Number.isFinite(sec)) return "0:00";
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
 </script>
 
 <template>
-  <div v-if="currentTrack" class="player-bar glass">
-    <img v-if="currentTrack.coverArt" class="cover" :src="coverArtUrl(currentTrack.coverArt)" alt="" />
-    <div class="meta">
-      <div class="title">{{ currentTrack.title }}</div>
-      <div class="artist">{{ currentTrack.artist }}</div>
-    </div>
-    <button
-      class="heart-btn"
-      :class="{ starred }"
-      :title="starred ? 'Unfavorite' : 'Favorite'"
-      @click="toggleStar"
-    >
-      {{ starred ? "♥" : "♡" }}
-    </button>
-    <StarRating class="rating-slot" :song="currentTrack" />
-    <button class="heart-btn extra" title="Lyrics" @click="openLyrics">🎤</button>
-    <button class="heart-btn extra" title="Queue" @click="openQueue">☰</button>
-    <div class="controls">
-      <button
-        class="mode-btn"
-        :class="{ active: playerState.shuffle }"
-        :title="playerState.shuffle ? 'Shuffle: on' : 'Shuffle: off'"
-        @click="toggleShuffle"
-      >
-        🔀
+  <template v-if="currentTrack">
+    <div v-if="playerState.view === 'bar'" class="player-bar glass">
+      <button class="cover-btn" title="Open player" @click="setView('full')">
+        <img class="cover" :src="currentTrack.coverArt ? coverArtUrl(currentTrack.coverArt) : '/music-cover.jpg'" alt="" />
+        <span class="cover-hint">⤢</span>
       </button>
-      <button @click="prev">⏮</button>
-      <button class="play-pause" @click="toggle">{{ playerState.isPlaying ? "⏸" : "▶" }}</button>
-      <button @click="next">⏭</button>
-      <button
-        class="mode-btn"
-        :class="{ active: playerState.repeat !== 'off' }"
-        :title="repeatTitle"
-        @click="cycleRepeat"
-      >
-        {{ playerState.repeat === "one" ? "🔂" : "🔁" }}
-      </button>
-    </div>
-    <div class="progress">
-      <span class="time">{{ formatTime(playerState.currentTime) }}</span>
-      <input
-        class="seek"
-        type="range"
-        min="0"
-        :max="playerState.duration || 0"
-        :value="playerState.currentTime"
-        @input="onSeek"
-      />
-      <span class="time">{{ formatTime(playerState.duration) }}</span>
-    </div>
-    <div class="volume">
-      <button class="heart-btn" :title="playerState.volume > 0 ? 'Mute' : 'Unmute'" @click="toggleMute">
-        {{ playerState.volume === 0 ? "🔇" : playerState.volume < 0.5 ? "🔉" : "🔊" }}
-      </button>
-      <input type="range" min="0" max="1" step="0.01" :value="playerState.volume" @input="onVolume" />
-    </div>
-
-    <Modal
-      v-if="showLyrics"
-      :title="`${currentTrack.title} — ${currentTrack.artist}`"
-      @close="showLyrics = false"
-    >
-      <p v-if="lyricsState === 'loading'" class="lyrics-status">Loading lyrics…</p>
-      <p v-else-if="lyricsState === 'empty'" class="lyrics-status">No lyrics found.</p>
-      <p v-else-if="lyricsState === 'error'" class="lyrics-status">Couldn't load lyrics.</p>
-      <pre v-else class="lyrics-text">{{ lyricsText }}</pre>
-    </Modal>
-
-    <Modal v-if="showQueue" :title="`Queue · ${playerState.queue.length}`" @close="showQueue = false">
-      <div class="queue-actions">
-        <button @click="handleClearQueue">Clear queue</button>
+      <div class="meta" @click="setView('full')">
+        <div class="title">{{ currentTrack.title }}</div>
+        <div class="artist">{{ currentTrack.artist }}</div>
       </div>
-      <ol ref="queueList" class="queue-list">
-        <li
-          v-for="(song, i) in playerState.queue"
-          :key="`${song.id}-${i}`"
-          class="queue-item"
-          :class="{ current: i === playerState.currentIndex, played: i < playerState.currentIndex }"
+      <button
+        class="heart-btn"
+        :class="{ starred }"
+        :title="starred ? 'Unfavorite' : 'Favorite'"
+        @click="toggleCurrentStar"
+      >
+        {{ starred ? "♥" : "♡" }}
+      </button>
+      <StarRating class="rating-slot" :song="currentTrack" />
+      <button class="heart-btn extra" title="Lyrics" @click="setView('full')">🎤</button>
+      <button class="heart-btn extra" title="Queue" @click="showQueue = true">☰</button>
+      <div class="controls">
+        <button
+          class="mode-btn"
+          :class="{ active: playerState.shuffle }"
+          :title="playerState.shuffle ? 'Shuffle: on' : 'Shuffle: off'"
+          @click="toggleShuffle"
         >
-          <button class="queue-jump" @click="jumpTo(i)">
-            <span class="queue-index">{{ i === playerState.currentIndex ? "▶" : i + 1 }}</span>
-            <span class="queue-meta">
-              <span class="queue-title">{{ song.title }}</span>
-              <span class="queue-artist">{{ song.artist }}</span>
-            </span>
-          </button>
-          <button class="heart-btn" title="Remove from queue" @click="removeFromQueue(i)">✕</button>
-        </li>
-      </ol>
-    </Modal>
-  </div>
+          🔀
+        </button>
+        <button @click="prev">⏮</button>
+        <button class="play-pause" @click="toggle">{{ playerState.isPlaying ? "⏸" : "▶" }}</button>
+        <button @click="next">⏭</button>
+        <button
+          class="mode-btn"
+          :class="{ active: playerState.repeat !== 'off' }"
+          :title="repeatTitle"
+          @click="cycleRepeat"
+        >
+          {{ playerState.repeat === "one" ? "🔂" : "🔁" }}
+        </button>
+      </div>
+      <div class="progress">
+        <span class="time">{{ formatTime(playerState.currentTime) }}</span>
+        <input
+          class="seek"
+          type="range"
+          min="0"
+          :max="playerState.duration || 0"
+          :value="playerState.currentTime"
+          @input="onSeek"
+        />
+        <span class="time">{{ formatTime(playerState.duration) }}</span>
+      </div>
+      <div class="volume">
+        <button class="heart-btn" :title="playerState.volume > 0 ? 'Mute' : 'Unmute'" @click="toggleMute">
+          {{ playerState.volume === 0 ? "🔇" : playerState.volume < 0.5 ? "🔉" : "🔊" }}
+        </button>
+        <input type="range" min="0" max="1" step="0.01" :value="playerState.volume" @input="onVolume" />
+      </div>
+      <div class="window-btns">
+        <button class="win-btn" title="Maximize" @click="setView('full')">⤢</button>
+        <button class="win-btn" title="Minimize" @click="setView('mini')">–</button>
+        <button class="win-btn" title="Close" @click="closePlayer">✕</button>
+      </div>
+    </div>
+
+    <MiniPlayer v-if="playerState.view === 'mini'" />
+    <FullPlayer :open="playerState.view === 'full'" @queue="showQueue = true" />
+    <QueueModal v-if="showQueue" @close="showQueue = false" />
+  </template>
 </template>
 
 <style scoped>
@@ -228,6 +147,32 @@ function formatTime(sec: number): string {
   background: rgba(23, 26, 33, 0.92);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
+.cover-btn {
+  position: relative;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  overflow: hidden;
+  line-height: 0;
+}
+.cover-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.cover-btn:hover .cover-hint {
+  opacity: 1;
+}
 .cover {
   width: 2.5rem;
   height: 2.5rem;
@@ -236,6 +181,7 @@ function formatTime(sec: number): string {
   flex-shrink: 0;
 }
 .meta {
+  cursor: pointer;
   min-width: 8rem;
   max-width: 12rem;
   overflow: hidden;
@@ -325,6 +271,30 @@ function formatTime(sec: number): string {
   flex-shrink: 0;
 }
 
+.window-btns {
+  display: flex;
+  gap: 0.1rem;
+  flex-shrink: 0;
+  margin-left: 0.25rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid var(--border);
+}
+.win-btn {
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  line-height: 1;
+  font-size: 0.9rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  opacity: 0.55;
+}
+.win-btn:hover {
+  opacity: 1;
+  background: var(--surface-hover);
+}
+
 /* Phones: one row can't fit everything (it used to push the playback
    controls off the right edge), so wrap into two — cover/title/♥/controls
    on top, progress bar + lyrics/queue below. The progress row's 60% basis
@@ -356,8 +326,13 @@ function formatTime(sec: number): string {
     flex: 1 1 60%;
     gap: 0.5rem;
   }
-  .extra {
+  .extra,
+  .window-btns {
     order: 2;
+  }
+  .window-btns {
+    margin-left: 0;
+    padding-left: 0.25rem;
   }
   /* Rating stays available on every track row; phones use hardware volume. */
   .rating-slot,
@@ -366,74 +341,4 @@ function formatTime(sec: number): string {
   }
 }
 
-.queue-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 0.5rem;
-}
-.queue-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.queue-item {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  border-radius: 6px;
-}
-.queue-item.current {
-  background: var(--surface-hover);
-}
-.queue-item.played {
-  opacity: 0.5;
-}
-.queue-jump {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  flex: 1;
-  min-width: 0;
-  padding: 0.4rem 0.5rem;
-  background: none;
-  border: none;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.queue-index {
-  width: 1.75rem;
-  flex-shrink: 0;
-  text-align: right;
-  font-size: 0.8rem;
-  font-variant-numeric: tabular-nums;
-  opacity: 0.6;
-}
-.queue-meta {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.queue-title,
-.queue-artist {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.queue-artist {
-  font-size: 0.8rem;
-  opacity: 0.7;
-}
-
-.lyrics-status {
-  opacity: 0.7;
-  text-align: center;
-  padding: 1rem 0;
-}
-.lyrics-text {
-  white-space: pre-wrap;
-  font-family: inherit;
-  line-height: 1.6;
-  text-align: center;
-}
 </style>

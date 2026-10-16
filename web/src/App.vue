@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from "vue-router";
 import { isLoggedIn, logout } from "./stores/auth";
+import { playerState, currentTrack } from "./stores/player";
 import PlayerBar from "./components/PlayerBar.vue";
 import UploadPanel from "./components/upload/UploadPanel.vue";
 
@@ -61,7 +62,7 @@ async function handleLogout() {
     <!-- Folders gets more room: it's a file manager with a sidebar tree. -->
     <main
       class="mx-auto px-4 py-5"
-      :class="[route.name === 'folders' ? 'max-w-7xl' : 'max-w-5xl', { 'pb-24 max-[600px]:pb-32': isLoggedIn() }]"
+      :class="[route.name === 'folders' ? 'max-w-7xl' : 'max-w-5xl', { 'pb-24 max-[600px]:pb-32': isLoggedIn() && currentTrack && playerState.view === 'bar' }]"
     >
       <RouterView />
     </main>

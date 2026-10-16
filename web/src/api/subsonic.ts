@@ -337,16 +337,17 @@ export async function setRating(songId: string, rating: number): Promise<void> {
   await call("setRating", { id: songId, rating });
 }
 
-export interface Lyrics {
-  artist?: string;
-  title?: string;
-  // Absent when no exact match was found (see getLyrics in src/index.ts).
-  value?: string;
+export interface StructuredLyrics {
+  synced: boolean;
+  // `start` is in milliseconds, present on synced lyrics only.
+  line: { start?: number; value?: string }[];
 }
 
-export async function getLyrics(artist: string, title: string): Promise<Lyrics> {
-  const body = await call<{ lyrics: Lyrics }>("getLyrics", { artist, title });
-  return body.lyrics;
+// OpenSubsonic's getLyricsBySongId — unlike getLyrics it keeps per-line
+// timing, which the full-screen player uses for scrolling lyrics.
+export async function getLyricsBySongId(id: string): Promise<StructuredLyrics | null> {
+  const body = await call<{ lyricsList: { structuredLyrics?: StructuredLyrics[] } }>("getLyricsBySongId", { id });
+  return body.lyricsList.structuredLyrics?.[0] ?? null;
 }
 
 export interface FolderStats {

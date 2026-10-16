@@ -2,7 +2,7 @@
 // mirrored to the server via savePlayQueue (and restored with getPlayQueue)
 // so playback resumes across reloads and devices, same as Amperfy & co.
 import { computed, reactive } from "vue";
-import { coverArtUrl, getPlayQueue, savePlayQueue, scrobble, streamUrl, type Song } from "../api/subsonic";
+import { coverArtUrl, getPlayQueue, savePlayQueue, scrobble, star, streamUrl, unstar, type Song } from "../api/subsonic";
 
 const audio = new Audio();
 
@@ -19,6 +19,10 @@ let scrobblePending = false;
 const PREV_RESTART_THRESHOLD_SEC = 3;
 
 export type RepeatMode = "off" | "all" | "one";
+
+// How the player is shown: the bottom bar, a small floating disc
+// (minimized), the full-screen "now playing" view, or hidden (closed).
+export type PlayerView = "bar" | "mini" | "full" | "closed";
 
 const PREFS_KEY = "player-prefs";
 
@@ -60,6 +64,7 @@ const state = reactive({
   shuffle: prefs.shuffle,
   repeat: prefs.repeat,
   volume: prefs.volume,
+  view: "bar" as PlayerView,
 });
 
 audio.volume = state.volume;
@@ -132,6 +137,8 @@ function loadCurrent(autoplay = true, startAt = 0): void {
 }
 
 export function playQueue(tracks: Song[], startIndex = 0): void {
+  // Starting something new brings a closed player back.
+  if (state.view === "closed") state.view = "bar";
   state.originalQueue = tracks;
   if (state.shuffle) {
     state.queue = shuffleAround(tracks, tracks[startIndex]);
@@ -280,6 +287,33 @@ export function clearQueue(): void {
   state.currentTime = 0;
   state.duration = 0;
   persistQueue();
+}
+
+// Mutates the shared Song object (not a local copy) — the current track is
+// the same reactive object its list row renders, so this keeps both in sync
+// without a round-trip re-fetch.
+export async function toggleCurrentStar(): Promise<void> {
+  const track = state.queue[state.currentIndex];
+  if (!track) return;
+  const prevStarred = track.starred;
+  const nextStarred = !prevStarred;
+  track.starred = nextStarred ? new Date().toISOString() : undefined; // optimistic
+  try {
+    await (nextStarred ? star(track.id) : unstar(track.id));
+  } catch {
+    track.starred = prevStarred;
+  }
+}
+
+export function setView(view: PlayerView): void {
+  state.view = view;
+}
+
+// Closing stops playback and hides the player; the queue is kept, so playing
+// anything again (which reopens it) doesn't lose what was lined up.
+export function closePlayer(): void {
+  audio.pause();
+  state.view = "closed";
 }
 
 export function seek(time: number): void {
