@@ -8,9 +8,9 @@
 
 Turn Telegram into a free, effectively unlimited-capacity personal music cloud: a Cloudflare Worker that directly implements the [Subsonic REST API](http://www.subsonic.org/pages/api.jsp). Audio files themselves live in a private Telegram channel (via the official Bot API — no rclone/WebDAV middleman), while metadata lives in Cloudflare D1. Any Subsonic-compatible client (Amperfy, DSub, Ultrasonic, substreamer, ...) can connect directly to browse, play, and manage playlists.
 
-There's no long-running server in this setup — the Worker is invoked per-request, D1 and Telegram are both managed services, and seeking/scrubbing during playback rides on the standard HTTP Range support that Telegram's file-download endpoint natively provides (verified in practice), no extra workarounds needed.
+There's no long-running server in this setup — the Worker is invoked per-request, D1 and Telegram are both managed services, and seeking/scrubbing during playback works because the Worker fetches the full file from Telegram and slices the requested byte range itself (Telegram's file CDN doesn't reliably honor Range requests — see the comment in `src/storage/telegram.ts`).
 
-**Current limitation**: a single audio file must be under 20MB (a hard limit of the Telegram Bot API's `getFile`); larger files are skipped during import. If larger files (e.g. lossless albums) need to be supported down the line, chunking or switching to MTProto/another storage backend would be the way to go.
+**Current limitation**: a single audio file must be under 20MB (a hard limit of the Telegram Bot API's `getFile`); larger files are skipped during import. If larger files (e.g. lossless albums) need to be supported down the line, switching to MTProto/another storage backend would be the way to go.
 
 ![Web UI screenshot](docs/screenshot.png)
 
@@ -48,7 +48,7 @@ Cloudflare Worker (src/index.ts — routing + auth + Subsonic response building)
    ↕
 Cloudflare D1 (artists/albums/tracks/playlists metadata)
    ↕ file_ref (JSON: {messageId, fileId})
-Telegram Bot API (sendDocument to upload / getFile + file CDN to download, Range supported)
+Telegram Bot API (sendDocument to upload / getFile + file CDN to download (the CDN doesn't reliably honor Range requests, so the Worker fetches the full file and slices byte ranges itself))
 ```
 
 The storage layer is an interface (`src/storage/types.ts`) with a Telegram implementation (`src/storage/telegram.ts`) as the source of truth for every file. In front of that sits an optional R2 read-through cache (`src/storage/cached.ts`, see below) — enabled only if you bind an R2 bucket; without it, every request talks to Telegram directly, same as before that cache existed.

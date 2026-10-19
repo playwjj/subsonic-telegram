@@ -8,9 +8,9 @@
 
 把 Telegram 变成免费、无限容量的私人音乐云盘：一个 Cloudflare Worker 直接实现 [Subsonic REST API](http://www.subsonic.org/pages/api.jsp)，音频文件本体存在 Telegram 私有频道里（走官方 Bot API，不依赖 rclone/WebDAV 之类的中间层），元数据存 Cloudflare D1。任何支持 Subsonic 协议的客户端（Amperfy、DSub、Ultrasonic、substreamer……）都能直接连上来听歌、管理歌单。
 
-整个方案没有常驻服务器——Worker 按请求触发，D1 和 Telegram 都是托管服务，播放时 seek/拖进度条走的是 Telegram 文件下载接口原生支持的标准 HTTP Range（已实测验证），不需要额外绕路。
+整个方案没有常驻服务器——Worker 按请求触发，D1 和 Telegram 都是托管服务，播放时 seek/拖进度条的原理是 Worker 从 Telegram 拉取完整文件后自己按 Range 切片返回（Telegram 的文件 CDN 并不可靠地支持 Range 请求——详见 `src/storage/telegram.ts` 里的注释）。
 
-**当前限制**：单个音乐文件不超过 20MB（Telegram Bot API `getFile` 的硬限制），超过的文件导入时会被跳过。以后如果需要支持更大文件（比如无损专辑),再考虑分片或换用 MTProto/其它存储后端。
+**当前限制**：单个音乐文件不超过 20MB（Telegram Bot API `getFile` 的硬限制），超过的文件导入时会被跳过。以后如果需要支持更大文件（比如无损专辑),再考虑换用 MTProto/其它存储后端。
 
 ![Web UI 截图](docs/screenshot.png)
 
@@ -47,7 +47,7 @@ Cloudflare Worker（src/index.ts，路由 + 鉴权 + 拼 Subsonic 响应）
    ↕
 Cloudflare D1（artists/albums/tracks/playlists 元数据）
    ↕ file_ref (JSON: {messageId, fileId})
-Telegram Bot API（sendDocument 上传 / getFile+文件CDN 下载，支持 Range）
+Telegram Bot API（sendDocument 上传 / getFile+文件CDN 下载（CDN 不可靠地支持 Range 请求，Worker 总是拉取完整文件后自己切片））
 ```
 
 存储层是一个接口（`src/storage/types.ts`），Telegram 实现（`src/storage/telegram.ts`）是每个文件的最终来源。前面可以挂一层可选的 R2 缓存（`src/storage/cached.ts`，见下文）——只有绑定了 R2 bucket 才会启用；不绑定的话，每次请求都直接打 Telegram，跟没有这层缓存时完全一样。
