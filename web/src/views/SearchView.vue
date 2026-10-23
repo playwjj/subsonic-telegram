@@ -46,13 +46,17 @@ function sample<T>(items: T[], count: number): T[] {
   return copy.slice(0, count);
 }
 
-onMounted(async () => {
-  const [index, random] = await Promise.all([getArtists(), getRandomSongs(8)]);
-  discoverArtists.value = sample(
-    index.flatMap((group) => group.artist),
-    8,
+// Independent: the full artist index is the slow one, and the songs
+// shouldn't wait for it.
+onMounted(() => {
+  getArtists().then(
+    (index) => (discoverArtists.value = sample(index.flatMap((group) => group.artist), 8)),
+    () => {},
   );
-  discoverSongs.value = random;
+  getRandomSongs(8).then(
+    (random) => (discoverSongs.value = random),
+    () => {},
+  );
 });
 </script>
 

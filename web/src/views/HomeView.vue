@@ -22,6 +22,7 @@ const randomSongs = ref<Song[]>([]);
 const recentlyPlayed = ref<Song[]>([]);
 const mostPlayed = ref<Song[]>([]);
 const loading = ref(true);
+const error = ref("");
 const shuffling = ref(false);
 
 async function shuffle() {
@@ -38,26 +39,34 @@ function formatDuration(totalSeconds: number): string {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
-onMounted(async () => {
-  const [s, albums, random, played, most] = await Promise.all([
-    getLibraryStats(),
-    getAlbumList2({ type: "newest", size: 10 }),
-    getRandomSongs(8),
-    getRecentlyPlayed(8),
-    getMostPlayed(8),
+// Each section fills in as its own request lands, so one slow (or failed)
+// call doesn't hold the whole page on "Loading…".
+async function load() {
+  loading.value = true;
+  error.value = "";
+  const settle = <T,>(p: Promise<T>, set: (v: T) => void) =>
+    p.then(set, (e: unknown) => {
+      error.value = e instanceof Error ? e.message : String(e);
+    });
+  await Promise.all([
+    settle(getLibraryStats(), (v) => (stats.value = v)),
+    settle(getAlbumList2({ type: "newest", size: 10 }), (v) => (recentAlbums.value = v)),
+    settle(getRandomSongs(8), (v) => (randomSongs.value = v)),
+    settle(getRecentlyPlayed(8), (v) => (recentlyPlayed.value = v)),
+    settle(getMostPlayed(8), (v) => (mostPlayed.value = v)),
   ]);
-  stats.value = s;
-  recentAlbums.value = albums;
-  randomSongs.value = random;
-  recentlyPlayed.value = played;
-  mostPlayed.value = most;
   loading.value = false;
-});
+}
+
+onMounted(load);
 </script>
 
 <template>
   <div class="space-y-8">
-    <p v-if="loading" class="flex items-center gap-2 text-[var(--text-dim)]"><span class="spinner"></span> Loading…</p>
+    <p v-if="loading && !stats" class="flex items-center gap-2 text-[var(--text-dim)]"><span class="spinner"></span> Loading…</p>
+    <p v-if="error && !loading" class="error flex items-center gap-3">
+      Some sections couldn't load: {{ error }} <button class="text-sm" @click="load">Retry</button>
+    </p>
 
     <section v-if="stats" class="glass grid grid-cols-2 gap-4 p-6 sm:grid-cols-4">
       <div>
@@ -133,7 +142,7 @@ onMounted(async () => {
       </div>
     </section>
 
-    <p v-if="!loading && !stats?.songCount" class="text-[var(--text-dim)]">
+    <p v-if="!loading && stats && !stats.songCount" class="text-[var(--text-dim)]">
       No music yet — import some with <code>npm run import</code>.
     </p>
   </div>

@@ -42,6 +42,22 @@ watch(
   },
 );
 
+// A thin bar along the top while a page is being opened, so a slow
+// connection reads as "loading" rather than "the click did nothing". Only
+// shown past a short delay, so instant navigations don't flash it.
+const navigating = ref(false);
+let navTimer: ReturnType<typeof setTimeout> | undefined;
+router.beforeEach(() => {
+  clearTimeout(navTimer);
+  navTimer = setTimeout(() => (navigating.value = true), 120);
+});
+function navDone() {
+  clearTimeout(navTimer);
+  navigating.value = false;
+}
+router.afterEach(navDone);
+router.onError(navDone);
+
 async function handleLogout() {
   logout();
   await router.push({ name: "login" });
@@ -56,6 +72,8 @@ async function handleLogout() {
       <div class="absolute top-1/4 -right-40 h-[38rem] w-[38rem] rounded-full bg-violet-500/20 blur-[120px]"></div>
       <div class="absolute bottom-[-10rem] left-1/4 h-[30rem] w-[30rem] rounded-full bg-pink-500/10 blur-[110px]"></div>
     </div>
+
+    <div v-if="navigating" class="nav-progress" aria-hidden="true"></div>
 
     <!-- One row at every width: on phones the links scroll sideways (with a
          faded right edge as the hint) instead of wrapping into a second row. -->
@@ -116,3 +134,26 @@ async function handleLogout() {
     <PlayerBar v-if="isLoggedIn() && route.name !== 'login'" />
   </div>
 </template>
+
+<style scoped>
+.nav-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 60;
+  height: 2px;
+  width: 100%;
+  background: linear-gradient(to right, transparent, var(--accent), transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: nav-progress 1s ease-in-out infinite;
+}
+@keyframes nav-progress {
+  from {
+    background-position: -40% 0;
+  }
+  to {
+    background-position: 140% 0;
+  }
+}
+</style>

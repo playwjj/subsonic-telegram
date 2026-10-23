@@ -56,12 +56,47 @@ async function parseResponse<T>(res: Response): Promise<T> {
   return body as T;
 }
 
+// A request whose response hasn't even started by now is treated as lost:
+// on a flaky mobile connection it would otherwise leave a page on
+// "Loading…" forever. Only the wait for headers is bounded — a big listing
+// that's arriving slowly is left to finish.
+const HEADERS_TIMEOUT_MS = 25_000;
+
+// Read-only calls are safe to send twice; writes like updatePlaylist
+// (songIdToAdd) or createPlaylist are not, so they're never retried.
+function isRetryable(endpoint: string): boolean {
+  return /^(get|search|ping)/.test(endpoint);
+}
+
+async function fetchWithTimeout(url: string): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), HEADERS_TIMEOUT_MS);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function call<T>(
   endpoint: string,
   params?: Params,
   creds?: Credentials,
 ): Promise<T> {
-  return parseResponse<T>(await fetch(buildUrl(endpoint, params, creds)));
+  const url = buildUrl(endpoint, params, creds);
+  if (!isRetryable(endpoint)) return parseResponse<T>(await fetch(url));
+  // One retry on a dropped/timed-out request or a gateway error — never on
+  // a Subsonic error (bad credentials, not found), which would just repeat.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetchWithTimeout(url);
+      if (res.status >= 500 && attempt === 0) throw new Error(`HTTP ${res.status}`);
+      return await parseResponse<T>(res);
+    } catch (err) {
+      if (err instanceof SubsonicError || attempt > 0) throw err;
+      await new Promise((r) => setTimeout(r, 800));
+    }
+  }
 }
 
 // Same as call(), but with the params sent as a form body (the Worker's

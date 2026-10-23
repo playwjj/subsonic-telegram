@@ -35,6 +35,37 @@ const progressPct = computed(() =>
 // the right one over the course of the song.
 const leftR = computed(() => 15 + 29 * (1 - progressPct.value / 100));
 const rightR = computed(() => 15 + 29 * (progressPct.value / 100));
+
+// Reel rotation, driven from JS rather than a CSS animation: iOS Safari
+// doesn't repaint CSS-animated SVG inside a filtered group, so the reels
+// sat still there. Like a real deck, the tape runs at constant speed, so
+// the reel with less tape on it turns faster.
+const TAPE_SPEED = 4400; // degrees·radius per second: ~2.4s a turn mid-tape
+// Written straight to the DOM each frame — going through reactive state
+// would re-render the whole player 60 times a second.
+const reelAngles = [0, 0];
+const reelEls: (SVGGElement | null)[] = [null, null];
+let reelFrame = 0;
+let lastFrame = 0;
+function spinReels(now: number) {
+  const dt = lastFrame ? Math.min(now - lastFrame, 100) / 1000 : 0;
+  lastFrame = now;
+  const radii = [leftR.value, rightR.value];
+  for (const side of [0, 1]) {
+    reelAngles[side] = (reelAngles[side] + (TAPE_SPEED / radii[side]) * dt) % 360;
+    reelEls[side]?.setAttribute("transform", `rotate(${reelAngles[side]})`);
+  }
+  reelFrame = requestAnimationFrame(spinReels);
+}
+watch(
+  () => props.open && playerState.isPlaying,
+  (run) => {
+    cancelAnimationFrame(reelFrame);
+    lastFrame = 0;
+    if (run) reelFrame = requestAnimationFrame(spinReels);
+  },
+  { immediate: true },
+);
 function clip(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
@@ -180,6 +211,7 @@ watch(
 );
 
 onUnmounted(() => {
+  cancelAnimationFrame(reelFrame);
   document.body.style.overflow = "";
   document.removeEventListener("keydown", onKeydown);
 });
@@ -391,8 +423,8 @@ onUnmounted(() => {
                         <circle cx="112" cy="92" :r="leftR" fill="url(#wm-pack)" />
                         <circle cx="208" cy="92" :r="rightR" fill="url(#wm-pack)" />
                       </g>
-                      <g v-for="cx in [112, 208]" :key="cx" :transform="`translate(${cx} 92)`">
-                        <g class="reel" :class="{ spinning: playerState.isPlaying }">
+                      <g v-for="(cx, side) in [112, 208]" :key="cx" :transform="`translate(${cx} 92)`">
+                        <g :ref="(el) => (reelEls[side] = el as SVGGElement | null)" :transform="`rotate(${reelAngles[side]})`">
                           <circle r="12" fill="url(#wm-hub)" />
                           <rect
                             v-for="i in 6"
@@ -447,6 +479,7 @@ onUnmounted(() => {
               />
               <circle cx="328.6" cy="274.4" r="1.2" fill="#fff" fill-opacity="0.8" />
             </svg>
+            <p class="tap-hint">Tap the player for lyrics</p>
           </div>
 
           <div class="info-side">
@@ -642,7 +675,15 @@ onUnmounted(() => {
 }
 .disc-side {
   display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
+}
+.tap-hint {
+  display: none;
+  margin: 0.75rem 0 0;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.5);
 }
 .walkman {
   display: block;
@@ -670,15 +711,6 @@ onUnmounted(() => {
 }
 .key.pressed text {
   fill: #1f7a46;
-}
-.reel {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: spin 2.4s linear infinite;
-  animation-play-state: paused;
-}
-.reel.spinning {
-  animation-play-state: running;
 }
 .side {
   font-size: 14px;
@@ -984,13 +1016,21 @@ onUnmounted(() => {
 @media (max-width: 860px) {
   .stage {
     grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
     gap: 1rem;
-    padding: 0.5rem 1.5rem;
+    padding: 0.5rem 1.25rem;
     align-items: stretch;
   }
+  /* Lyrics mode: the info column gets the whole stage, so the lyrics fill
+     the space above the controls instead of running underneath them. */
+  .stage.show-lyrics {
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .tap-hint {
+    display: block;
+  }
   .walkman {
-    width: min(86vw, 50vh);
+    width: min(86vw, 46vh);
   }
   .disc-side {
     align-items: center;
@@ -1027,6 +1067,11 @@ onUnmounted(() => {
   }
   .line {
     transform-origin: center;
+    padding: 0.4rem 0.5rem;
+  }
+  /* A smaller zoom, so a long active line doesn't spill past the edges. */
+  .line.active {
+    transform: scale(1.06);
   }
   .volume {
     display: none;
@@ -1038,10 +1083,12 @@ onUnmounted(() => {
   .controls {
     gap: 0.4rem;
   }
+  .bottom {
+    padding: 0.5rem 1.25rem 1.5rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .reel,
   .bg-img {
     animation: none;
   }

@@ -13,14 +13,21 @@ const total = ref(0);
 const page = ref(0);
 const sort = ref<SongSort>("recent");
 const loading = ref(true);
+const error = ref("");
 const editing = ref<Song | null>(null);
 
 async function load() {
   loading.value = true;
-  const result = await getSongs({ size: PAGE_SIZE, offset: page.value * PAGE_SIZE, sort: sort.value });
-  songs.value = result.songs;
-  total.value = result.total;
-  loading.value = false;
+  error.value = "";
+  try {
+    const result = await getSongs({ size: PAGE_SIZE, offset: page.value * PAGE_SIZE, sort: sort.value });
+    songs.value = result.songs;
+    total.value = result.total;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    loading.value = false;
+  }
 }
 
 watch([page, sort], load, { immediate: true });
@@ -52,6 +59,9 @@ async function handleDelete(song: Song) {
     </div>
 
     <p v-if="loading" class="flex items-center gap-2 text-[var(--text-dim)]"><span class="spinner"></span> Loading…</p>
+    <p v-else-if="error" class="error flex items-center gap-3">
+      Couldn't load: {{ error }} <button class="text-sm" @click="load">Retry</button>
+    </p>
     <p v-else-if="!songs.length" class="text-[var(--text-dim)]">No songs yet.</p>
 
     <div v-else class="glass p-2">

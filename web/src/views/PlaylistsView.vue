@@ -6,11 +6,18 @@ import ShuffleButton from "../components/ShuffleButton.vue";
 const playlists = ref<Playlist[]>([]);
 const newName = ref("");
 const loading = ref(true);
+const error = ref("");
 
 async function load() {
   loading.value = true;
-  playlists.value = await getPlaylists();
-  loading.value = false;
+  error.value = "";
+  try {
+    playlists.value = await getPlaylists();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    loading.value = false;
+  }
 }
 onMounted(load);
 
@@ -31,6 +38,9 @@ async function create() {
       <button type="submit">Create</button>
     </form>
     <p v-if="loading" class="flex items-center gap-2 text-[var(--text-dim)]"><span class="spinner"></span> Loading…</p>
+    <p v-else-if="error" class="error flex items-center gap-3">
+      Couldn't load: {{ error }} <button class="text-sm" @click="load">Retry</button>
+    </p>
     <p v-else-if="!playlists.length">No playlists yet.</p>
     <ul v-else class="glass p-2">
       <li v-for="p in playlists" :key="p.id">
