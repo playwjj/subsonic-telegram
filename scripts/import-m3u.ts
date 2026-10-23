@@ -40,11 +40,13 @@ function flag(name: string): string | undefined {
   return arg ? arg.slice(`--${name}=`.length) : undefined;
 }
 
-const MUSIC_DIR = flag("music-dir") ?? process.env.LOCAL_MUSIC_DIR;
-if (!MUSIC_DIR) {
-  console.error("Need --music-dir=/path or LOCAL_MUSIC_DIR in .env (must match what `npm run import` used)");
-  process.exit(1);
-}
+// Exits inside the expression, so MUSIC_DIR is a string inside main() too
+// (a top-level `if (!MUSIC_DIR) exit` doesn't narrow it there).
+const MUSIC_DIR: string =
+  flag("music-dir") ||
+  process.env.LOCAL_MUSIC_DIR ||
+  (console.error("Need --music-dir=/path or LOCAL_MUSIC_DIR in .env (must match what `npm run import` used)"),
+  process.exit(1));
 
 function md5(input: string): string {
   return createHash("md5").update(input).digest("hex");
