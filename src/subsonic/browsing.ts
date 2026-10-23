@@ -173,10 +173,12 @@ export async function getAlbumList2(
 export async function getGenres(db: D1Database): Promise<SNode> {
   const { results } = await db
     .prepare(
-      `SELECT al.genre as genre, COUNT(DISTINCT al.id) as album_count, COUNT(t.id) as song_count
-       FROM albums al LEFT JOIN tracks t ON t.album_id = al.id
-       WHERE al.genre IS NOT NULL AND al.genre != ''
-       GROUP BY al.genre ORDER BY al.genre COLLATE NOCASE`,
+      // Per song, its own genre or else its album's (q.TRACK_GENRE); an
+      // album counts under every genre one of its songs has.
+      `SELECT genre, COUNT(DISTINCT album_id) as album_count, COUNT(*) as song_count
+       FROM (SELECT ${q.TRACK_GENRE} as genre, t.album_id FROM tracks t JOIN albums al ON al.id = t.album_id)
+       WHERE genre IS NOT NULL AND genre != ''
+       GROUP BY genre ORDER BY genre COLLATE NOCASE`,
     )
     .all<{ genre: string; album_count: number; song_count: number }>();
   return node("genres", undefined, {

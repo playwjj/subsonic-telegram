@@ -107,7 +107,7 @@ async function save() {
   saving.value = true;
   try {
     const result = Object.keys(edits).length
-      ? await updateTracks({ songIds: props.songIds, folderPaths: props.folderPaths }, edits)
+      ? await updateTracks({ songIds: props.songIds, folderPaths: props.folderPaths }, edits, { songLevel: true })
       : { updated: 1, albumIds: [] };
     // The song's own cover, not the album's: the album may well be a folder
     // of unrelated songs (an album match is the way to set an album cover).
@@ -120,7 +120,6 @@ async function save() {
   }
 }
 
-const albumAffected = computed(() => changed.value.some((f) => f.key === "year" || f.key === "genre"));
 </script>
 
 <template>
@@ -181,7 +180,6 @@ const albumAffected = computed(() => changed.value.some((f) => f.key === "year" 
       <p class="text-xs text-[var(--text-dim)]">
         Changes the library's tags only — the files in Telegram stay as they are. Songs keep their place in playlists
         and favorites.
-        <template v-if="albumAffected"> Year and genre are stored per album, so they change for the whole album.</template>
       </p>
       <p v-if="error" class="error text-sm">{{ error }}</p>
 

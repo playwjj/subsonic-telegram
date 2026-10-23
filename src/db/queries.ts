@@ -37,6 +37,9 @@ export interface TrackRow {
   bitrate: number | null;
   file_ref: string;
   created_at: number;
+  // The song's own year/genre (NULL: its album's), and the one in effect.
+  track_year: number | null;
+  track_genre: string | null;
   year: number | null;
   genre: string | null;
   play_count: number;
@@ -60,8 +63,13 @@ const ALBUM_SELECT = `
   LEFT JOIN tracks t ON t.album_id = al.id
 `;
 
+// A song's year/genre: its own if it has one, else its album's.
+export const TRACK_YEAR = "COALESCE(t.track_year, al.year)";
+export const TRACK_GENRE = "COALESCE(t.track_genre, al.genre)";
+const TRACK_COLUMNS = `t.*, al.name as album_name, ar.name as artist_name, ${TRACK_YEAR} as year, ${TRACK_GENRE} as genre`;
+
 const TRACK_SELECT = `
-  SELECT t.*, al.name as album_name, ar.name as artist_name, al.year, al.genre
+  SELECT ${TRACK_COLUMNS}
   FROM tracks t
   JOIN albums al ON al.id = t.album_id
   JOIN artists ar ON ar.id = t.artist_id
@@ -412,15 +420,15 @@ function randomSongsFilter(opts: {
   const conditions: string[] = [];
   const params: unknown[] = [];
   if (opts.genre !== undefined) {
-    conditions.push("al.genre = ?");
+    conditions.push(`${TRACK_GENRE} = ?`);
     params.push(opts.genre);
   }
   if (opts.fromYear !== undefined) {
-    conditions.push("al.year >= ?");
+    conditions.push(`${TRACK_YEAR} >= ?`);
     params.push(opts.fromYear);
   }
   if (opts.toYear !== undefined) {
-    conditions.push("al.year <= ?");
+    conditions.push(`${TRACK_YEAR} <= ?`);
     params.push(opts.toYear);
   }
   if (opts.excludeIds?.length) {
@@ -646,7 +654,7 @@ export async function listAllTracks(
   // walking artists by name first (CROSS JOIN keeps SQLite to that order).
   const select =
     opts.sort === "artist"
-      ? `SELECT t.*, al.name as album_name, ar.name as artist_name, al.year, al.genre
+      ? `SELECT ${TRACK_COLUMNS}
          FROM artists ar CROSS JOIN tracks t ON t.artist_id = ar.id JOIN albums al ON al.id = t.album_id`
       : TRACK_SELECT;
   const [{ results: tracks }, stats] = await Promise.all([
@@ -716,7 +724,7 @@ export async function getRandomTracksByGenreExcludingArtist(
   limit: number,
 ): Promise<TrackRow[]> {
   const { results } = await db
-    .prepare(`${TRACK_SELECT} WHERE al.genre = ? AND t.artist_id != ? ORDER BY RANDOM() LIMIT ?`)
+    .prepare(`${TRACK_SELECT} WHERE ${TRACK_GENRE} = ? AND t.artist_id != ? ORDER BY RANDOM() LIMIT ?`)
     .bind(genre, excludeArtistId, limit)
     .all<TrackRow>();
   return results;
@@ -931,6 +939,9 @@ export interface NewTrackInput {
   fileRef: string;
   sourcePath: string | null;
   filename: string;
+  // The song's own year/genre, where they differ from its album's.
+  trackYear?: number | null;
+  trackGenre?: string | null;
   // From freeTrackId beforehand (uploadTrack needs it for the caption).
   id?: string;
 }
@@ -957,8 +968,9 @@ export async function insertTrack(db: D1Database, input: NewTrackInput): Promise
   await db
     .prepare(
       `INSERT INTO tracks
-         (id, album_id, artist_id, title, track_no, disc_no, duration, suffix, content_type, size, bitrate, file_ref, created_at, source_path)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (id, album_id, artist_id, title, track_no, disc_no, duration, suffix, content_type, size, bitrate, file_ref, created_at, source_path,
+          track_year, track_genre)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO NOTHING`,
     )
     .bind(
@@ -976,6 +988,8 @@ export async function insertTrack(db: D1Database, input: NewTrackInput): Promise
       input.fileRef,
       Math.floor(Date.now() / 1000),
       input.sourcePath,
+      input.trackYear ?? null,
+      input.trackGenre ?? null,
     )
     .run();
   return id;

@@ -179,14 +179,22 @@ export async function addCovers(
       coveredAlbums.delete(song.albumId);
     }
   } else {
+    // The song's own cover, year and genre: its album is just its folder.
     try {
       const picture = await embeddedPicture(file);
       if (picture) {
         await setCoverArt(song.id, picture);
         notes.push("cover from file");
-      } else if (opts.online && song.artist !== "Unknown Artist") {
+      }
+      if (opts.online && song.artist !== "Unknown Artist" && (!picture || !song.year || !song.genre)) {
         const match = opts.fill?.match ?? (await confidentSong(song.artist, song.title, song.duration));
-        if (match && (await setFirstCover(song.id, [match], {}))) notes.push("cover found online");
+        if (match && !picture && (await setFirstCover(song.id, [match], {}))) notes.push("cover found online");
+        const year = !song.year && match?.year ? match.year : undefined;
+        const genre = !song.genre && match?.genre ? match.genre : undefined;
+        if (year || genre) {
+          await updateTracks({ songIds: [song.id] }, { year, genre }, { songLevel: true });
+          notes.push(`${[year && "year", genre && "genre"].filter(Boolean).join(" & ")} found online`);
+        }
       }
     } catch {
       // no cover, as before

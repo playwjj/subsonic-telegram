@@ -8,8 +8,11 @@ import { deleteFilesOrQueue } from "./folders";
 export class MetadataError extends Error {}
 
 // A field left undefined is kept as is. null clears it (year, genre, track,
-// disc). Year and genre live on the album, so they change for every song
-// of the album(s) the edited songs end up in.
+// disc). Year and genre live on the album, so by default they change for
+// every song of the album(s) the edited songs end up in (and drop the
+// songs' own values, so the album's show); with songLevel they're the
+// edited songs' own instead (tracks.track_year/track_genre, see
+// db/schema.sql), null there meaning "the album's".
 export interface TagEdits {
   title?: string;
   artist?: string;
@@ -69,6 +72,7 @@ export async function updateTracks(
   ids: string[],
   paths: string[],
   edits: TagEdits,
+  opts: { songLevel?: boolean } = {},
 ): Promise<{ updated: number; albumIds: string[] }> {
   const rows = await rowsFor(db, ids, paths);
   if (!rows.length) return { updated: 0, albumIds: [] };
@@ -151,6 +155,14 @@ export async function updateTracks(
     sets.push("disc_no = ?");
     binds.push(edits.disc);
   }
+  if (edits.year !== undefined) {
+    sets.push("track_year = ?");
+    binds.push(opts.songLevel ? edits.year : null);
+  }
+  if (edits.genre !== undefined) {
+    sets.push("track_genre = ?");
+    binds.push(opts.songLevel ? edits.genre : null);
+  }
   if (sets.length) {
     statements.push(
       db
@@ -161,11 +173,11 @@ export async function updateTracks(
 
   const albumSets: string[] = [];
   const albumBinds: (string | number | null)[] = [];
-  if (edits.year !== undefined) {
+  if (edits.year !== undefined && !opts.songLevel) {
     albumSets.push("year = ?");
     albumBinds.push(edits.year);
   }
-  if (edits.genre !== undefined) {
+  if (edits.genre !== undefined && !opts.songLevel) {
     albumSets.push("genre = ?");
     albumBinds.push(edits.genre);
   }

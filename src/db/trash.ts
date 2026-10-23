@@ -26,6 +26,8 @@ const COLUMNS = {
     "last_played",
     "rating",
     "cover_ref",
+    "track_year",
+    "track_genre",
   ],
   albums: ["id", "name", "artist_id", "year", "genre", "cover_ref", "created_at"],
   artists: ["id", "name", "sort_name", "cover_ref"],

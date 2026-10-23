@@ -53,6 +53,10 @@ CREATE TABLE IF NOT EXISTS tracks (
                                  -- unrelated songs (see scripts/fix-covers.ts) -- otherwise the
                                  -- track just falls back to its album's cover_ref (see
                                  -- src/subsonic/mappers.ts songNode / src/subsonic/media.ts).
+  track_year   INTEGER,         -- The song's own year/genre, where it differs from its album's
+  track_genre  TEXT,            -- (a folder of unrelated songs grouped as one album, say); NULL
+                                 -- means the album's. Read as COALESCE(track_*, album's) -- see
+                                 -- TRACK_SELECT in src/db/queries.ts.
   -- Parent folder of source_path ("a/b" for "a/b/c.mp3", "" for a file at the
   -- root, NULL when source_path is NULL). The inner rtrim strips every
   -- trailing non-"/" character (i.e. the file name), the outer one the "/".
@@ -60,6 +64,9 @@ CREATE TABLE IF NOT EXISTS tracks (
   -- scanning everything under it (see getFolder in src/index.ts).
   dir          TEXT GENERATED ALWAYS AS (rtrim(rtrim(source_path, replace(source_path, '/', '')), '/')) VIRTUAL
 );
+-- Existing databases created before track_year/track_genre existed need, once:
+--   ALTER TABLE tracks ADD COLUMN track_year INTEGER;
+--   ALTER TABLE tracks ADD COLUMN track_genre TEXT;
 -- Existing databases created before dir existed need, once (before running
 -- the rest of this file, since idx_tracks_dir below depends on it):
 --   ALTER TABLE tracks ADD COLUMN dir TEXT GENERATED ALWAYS AS (rtrim(rtrim(source_path, replace(source_path, '/', '')), '/')) VIRTUAL;

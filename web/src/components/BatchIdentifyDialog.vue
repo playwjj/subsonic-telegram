@@ -52,7 +52,8 @@ const leftOut = props.songs.length - rows.length;
 // match's album, with its year, genre and track number — off by default,
 // since it takes songs out of a folder's album. cover: the song's own
 // cover, or with album on, the matched album's cover if it has none.
-const opts = reactive({ cover: true, names: false, album: false });
+// yearGenre (album off): the release's year and genre as the songs' own.
+const opts = reactive({ cover: true, names: false, album: false, yearGenre: true });
 
 const phase = ref<"searching" | "review" | "applying" | "finished">("searching");
 let stopped = false;
@@ -152,6 +153,9 @@ function changesOf(row: Row): { key: keyof TagEdits; label: string; from: string
     add("genre", "genre", s.genre, m.genre);
     add("track", "track", s.track, m.track);
     if (m.disc && (m.disc > 1 || s.discNumber)) add("disc", "disc", s.discNumber, m.disc);
+  } else if (opts.yearGenre) {
+    add("year", "year", s.year, m.year);
+    add("genre", "genre", s.genre, m.genre);
   }
   return out;
 }
@@ -201,7 +205,8 @@ async function apply() {
     try {
       let albumId = row.song.albumId;
       if (Object.keys(edits).length) {
-        const result = await withRetry(() => updateTracks({ songIds: [row.song.id] }, edits));
+        // Staying in its album, the song's year/genre are its own.
+        const result = await withRetry(() => updateTracks({ songIds: [row.song.id] }, edits, { songLevel: !opts.album }));
         albumId = result.albumIds[0] ?? albumId;
       }
       if (cover && opts.album) {
@@ -242,6 +247,9 @@ function matchLabel(m: OnlineMatch): string {
         <label class="flex items-center gap-2">
           <input v-model="opts.cover" type="checkbox" :disabled="phase === 'applying'" /> Add covers
         </label>
+        <label v-if="!opts.album" class="flex items-center gap-2">
+          <input v-model="opts.yearGenre" type="checkbox" :disabled="phase === 'applying'" /> Set year &amp; genre
+        </label>
         <label class="flex items-center gap-2">
           <input v-model="opts.names" type="checkbox" :disabled="phase === 'applying'" /> Use the match's title &amp; artist
           spelling
@@ -257,7 +265,8 @@ function matchLabel(m: OnlineMatch): string {
         </template>
         <template v-else>
           Songs stay in their current album; a cover becomes the song's own (songs that already have one are left
-          alone). "Unknown Artist" songs get the matched title and artist either way.
+          alone), and year and genre are set on each song, not its album. "Unknown Artist" songs get the matched title
+          and artist either way.
         </template>
       </p>
 

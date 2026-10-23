@@ -621,12 +621,14 @@ export interface TagEdits {
 }
 
 // Songs by id, and/or everything under folders. Returns how many songs
-// changed and the album(s) they're in now.
+// changed and the album(s) they're in now. Year/genre go on the album(s)
+// unless songLevel, which makes them the songs' own.
 export async function updateTracks(
   target: { songIds?: string[]; folderPaths?: string[] },
   edits: TagEdits,
+  opts: { songLevel?: boolean } = {},
 ): Promise<{ updated: number; albumIds: string[] }> {
-  const params: Params = { id: target.songIds, path: target.folderPaths };
+  const params: Params = { id: target.songIds, path: target.folderPaths, songLevel: opts.songLevel ? "true" : undefined };
   for (const [key, value] of Object.entries(edits)) {
     if (value !== undefined) params[key] = value === null ? "" : value;
   }

@@ -781,6 +781,13 @@ export default {
         }
         const artistId = await q.ensureArtist(env.DB, artistName);
         await q.ensureAlbum(env.DB, albumName, artistId, year, genre);
+        // An album that already existed keeps its year/genre; a song whose
+        // tags say otherwise (one of a folder of unrelated songs) keeps its
+        // own.
+        const album =
+          year !== null || genre !== null
+            ? await env.DB.prepare(`SELECT year, genre FROM albums WHERE id = ?`).bind(albumId).first<{ year: number | null; genre: string | null }>()
+            : null;
         await q.insertTrack(env.DB, {
           id: trackId,
           albumId,
@@ -796,6 +803,8 @@ export default {
           fileRef,
           sourcePath,
           filename: storedName,
+          trackYear: year !== null && album && album.year !== year ? year : null,
+          trackGenre: genre !== null && album && album.genre !== genre ? genre : null,
         });
         const track = await q.getTrack(env.DB, trackId);
         return respond(subsonicSuccess(songNode(track!)), format);
@@ -966,14 +975,17 @@ export default {
 
       // Edits tags of songs (id) and/or everything under folders (path).
       // Only the fields present are changed; an empty year/genre/track/disc
-      // clears it. See src/subsonic/metadata.ts.
+      // clears it. Year/genre go on the albums unless songLevel=true. See
+      // src/subsonic/metadata.ts.
       case "updateTracks": {
         const ids = params.getAll("id");
         const paths = params.getAll("path");
         if (!ids.length && !paths.length) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id or path"), format);
         const edits = metadata.parseTagEdits(params);
         if (!Object.keys(edits).length) return respond(subsonicError(ERR.MISSING_PARAM, "Nothing to change"), format);
-        const result = await metadata.updateTracks(env.DB, ids, paths, edits);
+        const result = await metadata.updateTracks(env.DB, ids, paths, edits, {
+          songLevel: params.get("songLevel") === "true",
+        });
         return respond(
           subsonicSuccess(
             node(
