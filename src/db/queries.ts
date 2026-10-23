@@ -607,30 +607,16 @@ export interface LibraryStats {
   total_duration: number;
 }
 
-// Counting reads every row counted, and D1 bills each one, so the totals
-// are kept per isolate for a few minutes: right after an upload or delete
-// they can lag behind by that much.
-const STATS_TTL_MS = 5 * 60_000;
-let statsCache: { at: number; value: Promise<LibraryStats> } | undefined;
-
-export function getLibraryStats(db: D1Database): Promise<LibraryStats> {
-  if (statsCache && Date.now() - statsCache.at < STATS_TTL_MS) return statsCache.value;
-  const value = db
+// From library_total, which triggers keep in step with the tables (see
+// db/schema.sql) — one row read instead of counting the whole library.
+export async function getLibraryStats(db: D1Database): Promise<LibraryStats> {
+  const row = await db
     .prepare(
-      `SELECT (SELECT COUNT(*) FROM artists) as artist_count,
-              (SELECT COUNT(*) FROM albums) as album_count,
-              t.song_count, t.total_duration
-       FROM (SELECT COUNT(*) as song_count, COALESCE(SUM(duration), 0) as total_duration FROM tracks) t`,
+      `SELECT artists as artist_count, albums as album_count, songs as song_count, duration as total_duration
+       FROM library_total WHERE id = 1`,
     )
-    .first<LibraryStats>()
-    .then((row) => row!);
-  statsCache = { at: Date.now(), value };
-  value.catch(() => (statsCache = undefined));
-  return value;
-}
-
-export function forgetLibraryStats(): void {
-  statsCache = undefined;
+    .first<LibraryStats>();
+  return row ?? { artist_count: 0, album_count: 0, song_count: 0, total_duration: 0 };
 }
 
 const SONG_SORT_COLUMNS: Record<string, string> = {

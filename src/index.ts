@@ -101,10 +101,6 @@ async function makeStorage(env: Env, ctx: ExecutionContext): Promise<StorageBack
     : telegram;
 }
 
-// Endpoints that can change how many songs/albums/artists there are: they
-// drop this isolate's cached library totals (see getLibraryStats).
-const LIBRARY_COUNT_CHANGES = new Set(["uploadTrack", "deleteTrack", "deleteItems", "restoreTrash", "updateTracks"]);
-
 function retentionDays(env: Env): number {
   const days = Number(env.TRASH_RETENTION_DAYS);
   return days > 0 ? days : trash.DEFAULT_RETENTION_DAYS;
@@ -159,7 +155,6 @@ export default {
       return respond(subsonicSuccess(node("license", { valid: true })), format);
     }
     const storage = await makeStorage(env, ctx);
-    if (LIBRARY_COUNT_CHANGES.has(endpoint)) q.forgetLibraryStats();
 
     try {
       switch (endpoint) {

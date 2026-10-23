@@ -174,6 +174,40 @@ CREATE TRIGGER IF NOT EXISTS cache_total_resize AFTER UPDATE OF size ON cache_en
   UPDATE cache_total SET bytes = bytes - OLD.size + NEW.size WHERE id = 1;
 END;
 
+-- The library's totals for the home page and the Songs page, kept by the
+-- triggers below like cache_total: counting them reads every artist,
+-- album and track. One row (id = 1); seeded the first time this runs.
+CREATE TABLE IF NOT EXISTS library_total (
+  id       INTEGER PRIMARY KEY CHECK (id = 1),
+  artists  INTEGER NOT NULL,
+  albums   INTEGER NOT NULL,
+  songs    INTEGER NOT NULL,
+  duration INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO library_total (id, artists, albums, songs, duration)
+  SELECT 1, (SELECT COUNT(*) FROM artists), (SELECT COUNT(*) FROM albums), COUNT(*), COALESCE(SUM(duration), 0) FROM tracks;
+CREATE TRIGGER IF NOT EXISTS library_total_track_insert AFTER INSERT ON tracks BEGIN
+  UPDATE library_total SET songs = songs + 1, duration = duration + COALESCE(NEW.duration, 0) WHERE id = 1;
+END;
+CREATE TRIGGER IF NOT EXISTS library_total_track_delete AFTER DELETE ON tracks BEGIN
+  UPDATE library_total SET songs = songs - 1, duration = duration - COALESCE(OLD.duration, 0) WHERE id = 1;
+END;
+CREATE TRIGGER IF NOT EXISTS library_total_track_duration AFTER UPDATE OF duration ON tracks BEGIN
+  UPDATE library_total SET duration = duration - COALESCE(OLD.duration, 0) + COALESCE(NEW.duration, 0) WHERE id = 1;
+END;
+CREATE TRIGGER IF NOT EXISTS library_total_album_insert AFTER INSERT ON albums BEGIN
+  UPDATE library_total SET albums = albums + 1 WHERE id = 1;
+END;
+CREATE TRIGGER IF NOT EXISTS library_total_album_delete AFTER DELETE ON albums BEGIN
+  UPDATE library_total SET albums = albums - 1 WHERE id = 1;
+END;
+CREATE TRIGGER IF NOT EXISTS library_total_artist_insert AFTER INSERT ON artists BEGIN
+  UPDATE library_total SET artists = artists + 1 WHERE id = 1;
+END;
+CREATE TRIGGER IF NOT EXISTS library_total_artist_delete AFTER DELETE ON artists BEGIN
+  UPDATE library_total SET artists = artists - 1 WHERE id = 1;
+END;
+
 -- Trash (recycle bin) for the web UI's deletes — see src/subsonic/trash.ts.
 -- One entry per deleted folder (everything that was under it) or per
 -- individually deleted song. Rows removed from the live tables are kept in
