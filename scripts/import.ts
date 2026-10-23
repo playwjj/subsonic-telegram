@@ -114,12 +114,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function telegramSendDocument(bytes: Uint8Array, filename: string, mimeType: string) {
+// `caption`: the song's path and id, as the Worker's uploads write it
+// (captionFor in src/subsonic/captions.ts). Bot API captions max out at
+// 1024 characters.
+async function telegramSendDocument(bytes: Uint8Array, filename: string, mimeType: string, caption?: string) {
   for (let attempt = 1; attempt <= UPLOAD_RETRIES; attempt++) {
     try {
       const form = new FormData();
       form.set("chat_id", TG_CHANNEL_ID);
       form.set("document", new Blob([bytes], { type: mimeType }), filename);
+      if (caption) form.set("caption", caption.length <= 1024 ? caption : `${caption.slice(0, 1023)}…`);
       const res = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument`, {
         method: "POST",
         body: form,
@@ -213,13 +217,12 @@ async function main() {
       const albumId = await ensureAlbum(albumName, artistId, common.year ?? null, common.genre?.[0] ?? null);
 
       console.log(`Uploading: ${artistName} / ${albumName} / ${title}`);
-      const bytes = await readFile(file);
-      const message = await telegramSendDocument(bytes, path.basename(file), mimeType);
-      const fileId = message.document?.file_id ?? message.audio?.file_id;
-      if (!fileId) throw new Error("Telegram response missing file_id");
-
       const trackId = md5(`track:${albumId}:${path.basename(file)}`);
       const sourcePath = path.relative(MUSIC_DIR, file).split(path.sep).join("/");
+      const bytes = await readFile(file);
+      const message = await telegramSendDocument(bytes, path.basename(file), mimeType, `${sourcePath}\nid: ${trackId}`);
+      const fileId = message.document?.file_id ?? message.audio?.file_id;
+      if (!fileId) throw new Error("Telegram response missing file_id");
       await d1(
         `INSERT INTO tracks
            (id, album_id, artist_id, title, track_no, disc_no, duration, suffix, content_type, size, bitrate, file_ref, created_at, source_path)

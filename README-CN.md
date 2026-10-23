@@ -144,7 +144,7 @@ npm run db:migrate:remote
 
 这一步对新手最容易卡住，跟 Cloudflare 完全无关，纯 Telegram 操作。做完你会拿到两个值——`TG_BOT_TOKEN` 和 `TG_CHANNEL_ID`——部署时要填进 Worker Secrets（见下面第 4 步）。
 
-> **也可以让 Web 界面帮你找 channel id。** 不配置 `TG_BOT_TOKEN` / `TG_CHANNEL_ID` 这两个 secrets 时，登录 Web 界面后会进入 **Telegram storage** 页面。做完下面第 1、2 步后，把 bot token 贴进去，页面会列出最近 24 小时内 bot 被设为管理员的频道（也可以自己填频道 id 或 `@用户名`）。保存前会检查 bot 在该频道有没有发消息、编辑消息、删除消息的权限。token 和频道存在 D1 的 `settings` 表里，第 3 步就不用做了。配置了 secrets 时始终以 secrets 为准。库里已经有歌之后，页面不允许换成别的 bot 或频道（Telegram 的 file id 只对存它的那个 bot 有效），但同一个 bot 换新 token 是可以的。导入 / 修复封面脚本仍然从 `.env` 读取 `TG_BOT_TOKEN` / `TG_CHANNEL_ID`。
+> **也可以让 Web 界面帮你找 channel id。** 不配置 `TG_BOT_TOKEN` / `TG_CHANNEL_ID` 这两个 secrets 时，登录 Web 界面后会进入 **Telegram storage** 页面。做完下面第 1、2 步后，把 bot token 贴进去，页面会列出最近 24 小时内 bot 被设为管理员的频道（也可以自己填频道 id 或 `@用户名`）。保存前会检查 bot 在该频道有没有发消息、删除消息的权限。token 和频道存在 D1 的 `settings` 表里，第 3 步就不用做了。配置了 secrets 时始终以 secrets 为准。库里已经有歌之后，页面不允许换成别的 bot 或频道（Telegram 的 file id 只对存它的那个 bot 有效），但同一个 bot 换新 token 是可以的。导入 / 修复封面脚本仍然从 `.env` 读取 `TG_BOT_TOKEN` / `TG_CHANNEL_ID`。
 
 1. **创建 Bot**：Telegram 里找 [@BotFather](https://t.me/BotFather)，发 `/newbot`，按提示起个显示名字和用户名（用户名必须以 `bot` 结尾）。BotFather 会回一段形如 `123456789:AAH...` 的字符串，这就是 `TG_BOT_TOKEN`——拿到它等于拿到这个 bot 的完全控制权，不要泄露、不要提交进仓库。
 2. **建一个私有频道**：Telegram 客户端里新建 Channel，类型选 **Private**（这个频道纯粹用来存音频文件本体，不需要也不建议公开）。建好后把第 1 步的 bot 加为频道管理员（Administrators → Add Admin），「发送消息」「删除他人消息」两项权限都要勾上：发送消息用来上传文件，删除消息用来在彻底删除歌曲时把 Telegram 里的文件也删掉。缺任何一项，Web 界面的 Telegram storage 页面都不会保存这个 bot。

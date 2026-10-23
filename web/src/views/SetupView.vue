@@ -110,7 +110,7 @@ async function saveBot() {
           <h2>{{ status.source === "none" ? "Set up storage" : "Use another bot token" }}</h2>
           <ol class="steps text-sm">
             <li>Create a bot with <a href="https://t.me/BotFather" target="_blank" rel="noopener" class="link">@BotFather</a> (/newbot) and paste the token it gives you.</li>
-            <li>Add the bot as an admin of a channel of yours, with rights to post, edit and delete messages.</li>
+            <li>Add the bot as an admin of a channel of yours, with rights to post and delete messages.</li>
           </ol>
           <form class="row" @submit.prevent="checkBot">
             <input v-model="token" placeholder="Bot token, 123456789:AAH…" autocomplete="off" spellcheck="false" required />
