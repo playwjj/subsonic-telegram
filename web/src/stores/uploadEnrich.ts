@@ -92,7 +92,10 @@ export async function findMissingTags(file: {
     const artist = file.artist || parsed?.artist;
     const title = file.title || parsed?.title || (file.artist ? stem : undefined);
     if (!artist || !title) return null;
-    return await attempt(artist, title, { artist: file.artist ? undefined : artist, title: file.title ? undefined : title });
+    const found = await attempt(artist, title, { artist: file.artist ? undefined : artist, title: file.title ? undefined : title });
+    // The model can misjudge which half of "A - B" is the performer.
+    if (found || file.artist || file.title) return found;
+    return await attempt(title, artist, { artist: title, title: artist });
   } catch {
     return null;
   }

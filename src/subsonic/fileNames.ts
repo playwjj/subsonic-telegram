@@ -17,6 +17,7 @@ Rules:
 - Remove track numbers, file extensions, bitrate/quality tags ([320k], FLAC, 无损), and website names from the title.
 - Keep version markers that belong to the song, like (Live), (Remix), (伴奏), in the title.
 - The folder may name the artist (e.g. "周杰伦/叶惠美") when the file name doesn't.
+- Names come in either order: "Title - Artist" is as common as "Artist - Title". Decide which part is the performer (a singer or band) and which is the song.
 - If the input doesn't contain an artist, artist is null. Never guess one from your own knowledge.`;
 
 export interface ParsedName {

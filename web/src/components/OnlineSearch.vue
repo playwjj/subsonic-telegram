@@ -59,6 +59,20 @@ async function readFileName() {
     parsing.value = false;
   }
   await search();
+  // The model can misjudge which half of "A - B" is the performer: with no
+  // good match, try them the other way round and keep whichever did better.
+  const best = (list: OnlineMatch[]) => list[0]?.score ?? 0;
+  if (best(matches.value) >= 0.8 || !query.artist || !query.name) return;
+  const before = { artist: query.artist, name: query.name, matches: matches.value, errors: sourceErrors.value };
+  [query.artist, query.name] = [query.name, query.artist];
+  await search();
+  if (best(matches.value) <= best(before.matches)) {
+    query.artist = before.artist;
+    query.name = before.name;
+    matches.value = before.matches;
+    sourceErrors.value = before.errors;
+    noCover.clear();
+  }
 }
 
 function pick(m: OnlineMatch, i: number) {
