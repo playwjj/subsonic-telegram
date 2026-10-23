@@ -130,18 +130,12 @@ class SourceError extends Error {}
 // requests are retried a couple of times before giving up.
 const RATE_LIMIT_RETRIES = 2;
 const RATE_LIMIT_RETRY_MS = 400;
-// Successful answers are cached at Cloudflare's edge for a day, so opening
-// the same search again doesn't spend any of that quota.
-const CACHE_SECONDS = 86400;
 
 async function getJson<T>(url: string, source: string): Promise<T | null> {
   for (let attempt = 0; ; attempt++) {
     let res: Response;
     try {
-      res = await fetch(url, {
-        headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-        cf: { cacheEverything: true, cacheTtlByStatus: { "200-299": CACHE_SECONDS, "300-599": 0 } },
-      });
+      res = await fetch(url, { headers: { "User-Agent": USER_AGENT, Accept: "application/json" } });
     } catch {
       throw new SourceError(`${source} unreachable`);
     }
