@@ -15,7 +15,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "build": "npm --prefix web ci && npm --prefix web run build",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p scripts",
+    "build": "npm run typecheck && npm --prefix web ci && npm --prefix web run build",
     "web:dev": "npm --prefix web run dev",
     "db:migrate:local": "wrangler d1 execute subsonic-telegram --local --file=./db/schema.sql",
     "db:migrate:remote": "wrangler d1 execute subsonic-telegram --remote --file=./db/schema.sql",
