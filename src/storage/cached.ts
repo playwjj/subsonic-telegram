@@ -24,10 +24,6 @@ export class CachedStorage implements StorageBackend {
     return this.source.putFile(bytes, filename, mimeType, caption);
   }
 
-  setCaption(ref: string, caption: string): Promise<"ok" | "missing"> {
-    return this.source.setCaption(ref, caption);
-  }
-
   checkFile(ref: string): Promise<FileCheck> {
     return this.source.checkFile(ref);
   }
@@ -119,7 +115,7 @@ export class CachedStorage implements StorageBackend {
   // total R2 usage bounded without a separate cron Worker. Evicts oldest
   // (least-recently-served) entries first until back under the cap.
   private async evictIfNeeded(): Promise<void> {
-    let over = (await cache.getTotalCacheBytes(this.db)) - this.maxBytes;
+    let over = (await cache.getCacheTotals(this.db)).bytes - this.maxBytes;
     if (over <= 0) return;
     const stale = await cache.listOldestCacheEntries(this.db, 50);
     for (const e of stale) {

@@ -5,7 +5,6 @@
 import * as q from "../db/queries";
 import type { StorageBackend } from "../storage/types";
 import { queuePendingDeletes } from "../db/trash";
-import { enqueueIdsStatement, enqueueUnderStatement } from "./captions";
 
 // A failure the user caused (bad name, missing folder, name clash) rather
 // than a server fault — src/index.ts reports these as-is instead of as a
@@ -199,10 +198,6 @@ export async function moveItems(
 
   const statements = folderMoves.flatMap((m) => q.movePrefixStatements(db, m.from, m.to));
   if (trackMoves.length) statements.push(q.setTrackPathsStatement(db, trackMoves));
-  // Their Telegram captions show the path (see captions.ts).
-  statements.push(...folderMoves.map((m) => enqueueUnderStatement(db, m.to)));
-  const recaption = enqueueIdsStatement(db, trackMoves.map((m) => m.id));
-  if (recaption) statements.push(recaption);
   // Keep the folders things were moved out of, even if that emptied them.
   const keep = q.keepFoldersStatement(db, sourceDirs);
   if (keep) statements.push(keep);
@@ -218,7 +213,7 @@ export async function renameFolder(db: D1Database, path: string, newName: string
   if ((await childNames(db, parentOf(path))).has(name)) {
     throw new FolderError(`"${name}" already exists in this folder`);
   }
-  await db.batch([...q.movePrefixStatements(db, path, newPath), enqueueUnderStatement(db, newPath)]);
+  await db.batch(q.movePrefixStatements(db, path, newPath));
   return newPath;
 }
 
@@ -233,7 +228,7 @@ export async function renameTrackFile(db: D1Database, id: string, newName: strin
   const newPath = joinPath(dir, name);
   if (newPath === track.source_path) return newPath;
   if ((await childNames(db, dir)).has(name)) throw new FolderError(`"${name}" already exists in this folder`);
-  await db.batch([q.setTrackPathsStatement(db, [{ id, path: newPath }]), enqueueIdsStatement(db, [id])!]);
+  await q.setTrackPathsStatement(db, [{ id, path: newPath }]).run();
   return newPath;
 }
 

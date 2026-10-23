@@ -102,6 +102,9 @@ CREATE TABLE IF NOT EXISTS playlist_tracks (
   PRIMARY KEY (playlist_id, position)
 );
 CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist ON playlist_tracks(playlist_id);
+-- D1 enforces the track_id foreign key: without this, deleting a song scans
+-- every playlist entry to check none still points at it.
+CREATE INDEX IF NOT EXISTS idx_playlist_tracks_track ON playlist_tracks(track_id);
 
 -- Favorites (star/unstar/getStarred). item_type is 'artist', 'album', or
 -- 'track'; item_id references the matching table's id (not enforced via FK
@@ -151,6 +154,26 @@ CREATE TABLE IF NOT EXISTS cache_entries (
 );
 CREATE INDEX IF NOT EXISTS idx_cache_entries_last_accessed ON cache_entries(last_accessed);
 
+-- Running totals of cache_entries, kept by the triggers below, so checking
+-- the cache's size after every write reads one row instead of all of them.
+-- One row (id = 1); seeded from cache_entries the first time this runs.
+CREATE TABLE IF NOT EXISTS cache_total (
+  id      INTEGER PRIMARY KEY CHECK (id = 1),
+  entries INTEGER NOT NULL,
+  bytes   INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO cache_total (id, entries, bytes)
+  SELECT 1, COUNT(*), COALESCE(SUM(size), 0) FROM cache_entries;
+CREATE TRIGGER IF NOT EXISTS cache_total_insert AFTER INSERT ON cache_entries BEGIN
+  UPDATE cache_total SET entries = entries + 1, bytes = bytes + NEW.size WHERE id = 1;
+END;
+CREATE TRIGGER IF NOT EXISTS cache_total_delete AFTER DELETE ON cache_entries BEGIN
+  UPDATE cache_total SET entries = entries - 1, bytes = bytes - OLD.size WHERE id = 1;
+END;
+CREATE TRIGGER IF NOT EXISTS cache_total_resize AFTER UPDATE OF size ON cache_entries BEGIN
+  UPDATE cache_total SET bytes = bytes - OLD.size + NEW.size WHERE id = 1;
+END;
+
 -- Trash (recycle bin) for the web UI's deletes — see src/subsonic/trash.ts.
 -- One entry per deleted folder (everything that was under it) or per
 -- individually deleted song. Rows removed from the live tables are kept in
@@ -186,20 +209,6 @@ CREATE TABLE IF NOT EXISTS pending_deletes (
   last_error TEXT,
   created_at INTEGER NOT NULL
 );
-
--- Songs whose Telegram message caption (file path + song id, see
--- src/subsonic/captions.ts) needs to be (re)written: after a move or rename,
--- or for every song once the backfill is started from the Storage page.
--- Worked off a few at a time by a cron, to stay well under Telegram's rate
--- limits. attempts >= 5 means it gave up (last_error says why).
-CREATE TABLE IF NOT EXISTS caption_queue (
-  track_id   TEXT PRIMARY KEY,
-  queued_at  INTEGER NOT NULL,
-  attempts   INTEGER NOT NULL DEFAULT 0,
-  last_error TEXT
-);
--- The cron's next batch, without reading the rest of the queue.
-CREATE INDEX IF NOT EXISTS idx_caption_queue_next ON caption_queue(attempts, queued_at);
 
 -- Telegram storage set up from the web UI (src/telegramConfig.ts), for a
 -- deployment without TG_BOT_TOKEN / TG_CHANNEL_ID secrets. Keys:

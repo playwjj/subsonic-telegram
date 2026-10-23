@@ -154,25 +154,6 @@ export class TelegramStorage implements StorageBackend {
     return { failed, error };
   }
 
-  // Needs the bot to be able to edit its own posts in the channel (part of
-  // "Post messages"). Telegram rejects an unchanged caption with "message
-  // is not modified" — that counts as done.
-  async setCaption(refStr: string, caption: string): Promise<"ok" | "missing"> {
-    const ref = JSON.parse(refStr) as TelegramRef;
-    const res = await fetch(this.api("editMessageCaption"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: this.channelId, message_id: ref.messageId, caption: truncateCaption(caption) }),
-    });
-    const data = (await res.json()) as any;
-    if (data.ok) return "ok";
-    const description = String(data.description ?? "");
-    if (data.error_code === 429) throw new TelegramRateLimitError(Number(data.parameters?.retry_after) || 30);
-    if (description.includes("message is not modified")) return "ok";
-    if (/message to edit not found|MESSAGE_ID_INVALID/i.test(description)) return "missing";
-    throw new Error(`Telegram editMessageCaption failed: ${description || JSON.stringify(data)}`);
-  }
-
   // getFile is what streaming starts with, so a file that passes here can be
   // played. Files over 20MB fail it with "file is too big".
   async checkFile(refStr: string): Promise<FileCheck> {

@@ -147,7 +147,7 @@ npm run db:migrate:remote
 > **也可以让 Web 界面帮你找 channel id。** 不配置 `TG_BOT_TOKEN` / `TG_CHANNEL_ID` 这两个 secrets 时，登录 Web 界面后会进入 **Telegram storage** 页面。做完下面第 1、2 步后，把 bot token 贴进去，页面会列出最近 24 小时内 bot 被设为管理员的频道（也可以自己填频道 id 或 `@用户名`）。保存前会检查 bot 在该频道有没有发消息、编辑消息、删除消息的权限。token 和频道存在 D1 的 `settings` 表里，第 3 步就不用做了。配置了 secrets 时始终以 secrets 为准。库里已经有歌之后，页面不允许换成别的 bot 或频道（Telegram 的 file id 只对存它的那个 bot 有效），但同一个 bot 换新 token 是可以的。导入 / 修复封面脚本仍然从 `.env` 读取 `TG_BOT_TOKEN` / `TG_CHANNEL_ID`。
 
 1. **创建 Bot**：Telegram 里找 [@BotFather](https://t.me/BotFather)，发 `/newbot`，按提示起个显示名字和用户名（用户名必须以 `bot` 结尾）。BotFather 会回一段形如 `123456789:AAH...` 的字符串，这就是 `TG_BOT_TOKEN`——拿到它等于拿到这个 bot 的完全控制权，不要泄露、不要提交进仓库。
-2. **建一个私有频道**：Telegram 客户端里新建 Channel，类型选 **Private**（这个频道纯粹用来存音频文件本体，不需要也不建议公开）。建好后把第 1 步的 bot 加为频道管理员（Administrators → Add Admin），「发送消息」「编辑他人消息」「删除他人消息」三项权限都要勾上：发送消息用来上传文件，编辑消息用来在移动、改名后更新每首歌的 caption（路径和 id），删除消息用来在彻底删除歌曲时把 Telegram 里的文件也删掉。缺任何一项，Web 界面的 Telegram storage 页面都不会保存这个 bot。
+2. **建一个私有频道**：Telegram 客户端里新建 Channel，类型选 **Private**（这个频道纯粹用来存音频文件本体，不需要也不建议公开）。建好后把第 1 步的 bot 加为频道管理员（Administrators → Add Admin），「发送消息」「删除他人消息」两项权限都要勾上：发送消息用来上传文件，删除消息用来在彻底删除歌曲时把 Telegram 里的文件也删掉。缺任何一项，Web 界面的 Telegram storage 页面都不会保存这个 bot。
 3. **拿到频道的 `chat_id`（即 `TG_CHANNEL_ID`）**：频道的 chat_id 是一个 `-100` 开头的负数长整数，跟频道的 `@用户名` 不是一回事，必须转成这个数字。两种拿法：
    - 最简单：往频道里随便发一条消息，把它转发给 [@getidsbot](https://t.me/getidsbot)（或任意同类 "get chat id" bot），它会直接告诉你带 `-100` 前缀的完整 chat_id。
    - 或者手动查：确保 bot 已经是频道管理员，在频道里发一条消息，然后浏览器打开 `https://api.telegram.org/bot<TG_BOT_TOKEN>/getUpdates`，在返回的 JSON 里找 `channel_post.chat.id`，就是 `TG_CHANNEL_ID`。
@@ -300,12 +300,9 @@ npm run fix-covers -- --artist-photos [--limit=N] [--dry-run] [--retry-failed]
 
 **Workers AI**（`wrangler.toml` 里的 `[ai]`，由 `src/subsonic/fileNames.ts` 里的 `parseFileName` 使用）只负责把文件名拆成艺人和歌名，从不让它提供事实。它返回的内容如果不在文件名或文件夹名里——比如翻译过的、或者它"知道"的艺人名——会被直接丢掉。除了账号开通了 Workers AI 之外不需要别的设置，用量只占每天免费额度的零头。删掉 `[ai]` 那一段就关掉了，只是少了 AI 这一步。
 
-**存储空间**（Folders 侧栏的 ▤ Storage）：总大小和总时长、回收站、R2 缓存（已用/上限）、封面数量、各顶层文件夹和各格式的占用、每月新增，以及最大的几个文件（超过 Telegram 20MB 下载上限、没法播放的会标出来）。这个页面上还有两个维护工具：
+**存储空间**（Folders 侧栏的 ▤ Storage）：总大小和总时长、回收站、R2 缓存（已用/上限）、封面数量、各顶层文件夹和各格式的占用、每月新增，以及最大的几个文件（超过 Telegram 20MB 下载上限、没法播放的会标出来）。页面上的**完整性检查**会逐个向 Telegram 查询（`getFile`，不下载）每首歌和每张封面的文件，由页面分批驱动，列出取不到的——已经不存在，或者超过 20MB——并且可以一键把这些坏掉的歌移进回收站。
 
-- **Telegram 消息说明（caption）**：频道里每首歌的消息都会带上一段说明，写着它的路径和歌曲 id，这样频道本身也看得懂，必要时还能拿来重建歌库。新上传的歌立即带上；移动、改名、或者还原时改了名，会在 `caption_queue` 表里排队，由每 2 分钟一次的 Cron 处理（每次 10 条，约每小时 300 条，给上传留出 Telegram 每个频道的速率余量）。「Caption all songs…」会把所有歌各排一次——用于加上这个功能之前上传的歌。修改说明需要 bot 能编辑自己在频道里发的消息；消息已经不存在的歌会记为失败。
-- **完整性检查**：逐个向 Telegram 查询（`getFile`，不下载）每首歌和每张封面的文件，由页面分批驱动，列出取不到的——已经不存在，或者超过 20MB——并且可以一键把这些坏掉的歌移进回收站。
-
-`caption_queue` 表也是 `CREATE TABLE IF NOT EXISTS`，跑一次 `npm run db:migrate:remote` 就能加上。
+**Telegram 消息说明（caption）**：上传时，频道里每首歌的消息都会带上一段说明，写着它的路径和歌曲 id，这样频道本身也看得懂。说明只在上传时写一次：移动、改名只改 D1，所以移动过的歌，说明里还是上传时的路径（id 始终是对的）。要恢复数据请用每周的 D1 备份，而不是这些说明。
 
 **查找重复**（Folders 侧栏的 ⧉ Duplicates）：按「标题和艺人相同、时长相差 3 秒以内」或者「文件大小和格式完全相同」分组。每组第一首是建议保留的那首——优先收藏过的，其次是评分、码率、文件大小、播放次数更高的。点「Select all but the suggested」再一键就能把其余的移进回收站，可以撤销。
 
@@ -356,7 +353,15 @@ npm run dev                # wrangler dev，读 .dev.vars 里的 Telegram 凭据
 ## 安全 / 单用户假设
 
 - `AUTH_PASSWORD` 明文存在 Worker secrets 里：Subsonic 的经典 token 鉴权（`t = md5(password + salt)`）要求服务端能拿到明文密码重算哈希，没有绕过的办法。这套东西设计成个人自用，不要拿会在别处复用的密码填这个值。
-- 没做多用户/权限隔离、没有速率限制。当前定位是"我自己用"，不是给别人开账号的公共服务。
+- 没做多用户/权限隔离，Worker 本身也没有速率限制。当前定位是"我自己用"，不是给别人开账号的公共服务。
+
+### 建议的加固（只在 Cloudflare 后台操作，不用改代码）
+
+`/rest/` 整个公网都能访问，只靠一个固定密码保护，所以建议：
+
+1. **用足够长的随机密码。** 20 位以上的随机字母和数字（有些 Subsonic 客户端处理 `&`、`#`、`%`、`+` 会出错），比如 `openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 24`。真正让暴力破解不可行的是这一条，下面两条只是拖慢速度。`AUTH_USERNAME` 别用 `admin` 这类常见词也有一点帮助——用户名错和密码错返回的是同一个错误。
+2. **给 `/rest/` 加限流。** 你的域名 → Security → Security rules → Create rule → Rate limiting rule：*URI Path* starts with `/rest/`，按 *IP* 计数，**每 10 秒 150 次**，超出后 *Block* 10 秒（免费版只能按路径匹配，周期和封禁时长都只能是 10 秒）。登录失败时 HTTP 状态码仍是 200（错误写在 Subsonic 响应里），所以规则只能统计全部请求、没法只数失败次数；而 Web 界面一次会加载几十张封面，所以阈值不能太低。如果在 Security → Events 里看到自己正常浏览也被拦了，就调高一点。
+3. **关掉 `workers.dev` 地址。** 域名上的规则管不到 `*.workers.dev`，别人可以从那里绕过：Workers & Pages → 该 Worker → Settings → Domains & Routes → 关掉 `workers.dev` 和 Preview URLs（先确认没有客户端在用这个地址）。下次部署后回来确认它们仍是关闭状态。
 
 ## 贡献
 

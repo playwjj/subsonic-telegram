@@ -13,9 +13,6 @@ export interface StorageBackend {
   // throw on failure: reports which refs couldn't be deleted (and why) so the
   // caller can queue them for a retry.
   deleteFiles(refs: string[]): Promise<DeleteFilesResult>;
-  // Replaces a stored file's caption. "missing": the file's message no
-  // longer exists. Throws TelegramRateLimitError when told to slow down.
-  setCaption(ref: string, caption: string): Promise<"ok" | "missing">;
   // Whether a file can still be fetched (without downloading it).
   checkFile(ref: string): Promise<FileCheck>;
 }

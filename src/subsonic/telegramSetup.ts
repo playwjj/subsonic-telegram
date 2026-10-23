@@ -125,13 +125,11 @@ export async function saveSetup(env: Env, token: string, channel: string): Promi
   const member = await botApi<{
     status: string;
     can_post_messages?: boolean;
-    can_edit_messages?: boolean;
     can_delete_messages?: boolean;
   }>(token, "getChatMember", { chat_id: chat.id, user_id: bot.id });
   if (member.status !== "administrator") throw new SetupError(`@${bot.username} isn't an admin of "${chat.title}"`);
   const missing = [
     !member.can_post_messages && "post messages",
-    !member.can_edit_messages && "edit messages of others",
     !member.can_delete_messages && "delete messages of others",
   ].filter(Boolean);
   if (missing.length) throw new SetupError(`@${bot.username} needs these admin rights in "${chat.title}": ${missing.join(", ")}`);

@@ -101,9 +101,6 @@ async function makeStorage(env: Env, ctx: ExecutionContext): Promise<StorageBack
     : telegram;
 }
 
-// Must match the daily entry in wrangler.toml's [triggers] crons.
-const DAILY_CRON = "17 3 * * *";
-
 // Endpoints that can change how many songs/albums/artists there are: they
 // drop this isolate's cached library totals (see getLibraryStats).
 const LIBRARY_COUNT_CHANGES = new Set(["uploadTrack", "deleteTrack", "deleteItems", "restoreTrash", "updateTracks"]);
@@ -1144,7 +1141,6 @@ export default {
                   covers: node("covers", { ...stats.covers }),
                   trash: node("trash", { ...stats.trash }),
                   cache: node("cache", { ...stats.cache }),
-                  captions: node("captions", { ...stats.captions }),
                 },
                 lists: {
                   folder: stats.folders.map(bucket("folder")),
@@ -1181,15 +1177,6 @@ export default {
           }
           throw err;
         }
-      }
-
-      // Queues caption updates for every song (all=true) — the one-off
-      // backfill for songs uploaded before captions existed — or clears the
-      // ones that gave up (clearFailed=true). The cron does the work.
-      case "queueCaptions": {
-        if (params.get("clearFailed") === "true") await captions.clearFailedCaptions(env.DB);
-        if (params.get("all") === "true") await captions.enqueueUnderStatement(env.DB, "").run();
-        return respond(subsonicSuccess(node("captions", { ...(await captions.captionStatus(env.DB)) })), format);
       }
 
       // The Telegram setup page (src/subsonic/telegramSetup.ts). Tokens
@@ -1237,16 +1224,12 @@ export default {
     }
   },
 
-  // Crons (wrangler.toml [triggers]). Daily: empties trash entries older
-  // than TRASH_RETENTION_DAYS, retries Telegram deletes that failed
-  // earlier and drops queued captions of deleted songs. Every few minutes:
-  // works off the caption queue.
-  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  // Daily cron (wrangler.toml [triggers]): empties trash entries older
+  // than TRASH_RETENTION_DAYS and retries Telegram deletes that failed
+  // earlier.
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     if (!(await getTelegramConfig(env))) return;
     const storage = await makeStorage(env, ctx);
-    if (controller.cron === DAILY_CRON) {
-      await trash.dailyCleanup(env.DB, storage, retentionDays(env));
-      await captions.pruneCaptionQueue(env.DB);
-    } else await captions.processCaptionQueue(env.DB, storage);
+    await trash.dailyCleanup(env.DB, storage, retentionDays(env));
   },
 } satisfies ExportedHandler<Env>;

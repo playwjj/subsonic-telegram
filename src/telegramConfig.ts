@@ -86,9 +86,6 @@ export class UnconfiguredStorage implements SourceStorage {
   async deleteFiles(refs: string[]): Promise<DeleteFilesResult> {
     return { failed: refs, error: new StorageNotConfiguredError().message };
   }
-  async setCaption(): Promise<"ok" | "missing"> {
-    this.fail();
-  }
   async checkFile(): Promise<FileCheck> {
     return { ok: false, error: new StorageNotConfiguredError().message };
   }

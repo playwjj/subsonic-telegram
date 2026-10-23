@@ -781,18 +781,12 @@ export async function getDuplicates(mode: DuplicateMode): Promise<Song[][]> {
   return (body.duplicates.group ?? []).map((g) => g.song);
 }
 
-// --- storage page (src/subsonic/storage.ts, captions.ts) ---
+// --- storage page (src/subsonic/storage.ts) ---
 
 export interface StorageBucket {
   name: string;
   songCount: number;
   size: number;
-}
-
-export interface CaptionStatus {
-  queued: number;
-  failed: number;
-  lastError?: string;
 }
 
 export interface StorageStats {
@@ -806,7 +800,6 @@ export interface StorageStats {
   covers: { albums: number; albumsWithCover: number; artistsWithPhoto: number; songCovers: number };
   trash: { entries: number; songCount: number; size: number };
   cache: { enabled: boolean; size: number; entries: number; maxBytes: number };
-  captions: CaptionStatus;
   largest: Song[];
 }
 
@@ -820,16 +813,6 @@ export async function getStorageStats(): Promise<StorageStats> {
     months: s.month ?? [],
     largest: s.largest ?? [],
   };
-}
-
-// all: queue a caption update for every song; clearFailed: forget the ones
-// that gave up.
-export async function queueCaptions(opts: { all?: boolean; clearFailed?: boolean }): Promise<CaptionStatus> {
-  const body = await callPost<{ captions: CaptionStatus }>("queueCaptions", {
-    all: opts.all ? "true" : undefined,
-    clearFailed: opts.clearFailed ? "true" : undefined,
-  });
-  return body.captions;
 }
 
 export interface FileProblem {

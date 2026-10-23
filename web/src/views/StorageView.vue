@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, onUnmounted, reactive, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import {
   checkFiles,
   deleteItems,
   getStorageStats,
-  queueCaptions,
   SubsonicError,
   UploadError,
   type FileProblem,
@@ -13,8 +12,8 @@ import {
 import { formatBytes, parentOf } from "../utils/format";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 
-// Where the space goes, the R2 cache, the Telegram caption queue, and a
-// check that every file can still be fetched.
+// Where the space goes, the R2 cache, and a check that every file can
+// still be fetched.
 const stats = ref<StorageStats | null>(null);
 const error = ref("");
 
@@ -25,29 +24,8 @@ async function load() {
   } catch (e) {
     error.value = e instanceof SubsonicError ? e.message : "Failed to load";
   }
-  scheduleRefresh();
 }
 load();
-
-// While captions are being written, keep the count moving — just the count:
-// the full stats read the whole library, and D1 bills every row read. Even
-// the count reads the whole queue, so it's slow and skipped while hidden.
-let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-function scheduleRefresh() {
-  clearTimeout(refreshTimer);
-  if (stats.value?.captions.queued) refreshTimer = setTimeout(refreshCaptions, 5 * 60_000);
-}
-async function refreshCaptions() {
-  if (document.hidden || !stats.value) return scheduleRefresh();
-  try {
-    stats.value.captions = await queueCaptions({});
-  } catch {
-    // keep the last count; try again next round
-  }
-  if (stats.value.captions.queued) scheduleRefresh();
-  else load();
-}
-onUnmounted(() => clearTimeout(refreshTimer));
 
 function hours(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -62,23 +40,6 @@ function folderLink(path: string) {
 }
 
 const TOO_BIG = 20 * 1024 * 1024;
-
-// --- captions ---
-
-const confirmCaptions = ref(false);
-async function startCaptions() {
-  confirmCaptions.value = false;
-  if (stats.value) stats.value.captions = await queueCaptions({ all: true });
-  scheduleRefresh();
-}
-async function clearFailedCaptions() {
-  if (stats.value) stats.value.captions = await queueCaptions({ clearFailed: true });
-}
-// Rough: the cron does about 300 an hour.
-const captionEta = computed(() => {
-  const n = stats.value?.captions.queued ?? 0;
-  return n < 300 ? "under an hour" : `about ${Math.ceil(n / 300)} hours`;
-});
 
 // --- integrity check ---
 
@@ -274,27 +235,6 @@ function problemLink(p: FileProblem) {
       </section>
 
       <section class="glass panel">
-        <h2>Telegram captions</h2>
-        <p class="text-sm text-[var(--text-dim)]">
-          Each song's message in the channel carries its path and id as a caption, so the channel makes sense on its own —
-          and could be used to rebuild the library. New uploads get one right away; moves and renames update it in the
-          background, a few every couple of minutes to stay clear of Telegram's rate limits.
-        </p>
-        <p class="mt-2 text-sm">
-          <template v-if="stats.captions.queued">
-            <span class="spinner"></span> {{ stats.captions.queued.toLocaleString() }} waiting · {{ captionEta }} to go
-          </template>
-          <template v-else>All captions are up to date.</template>
-          <template v-if="stats.captions.failed">
-            · <span class="error">{{ stats.captions.failed }} failed</span>
-            <span class="text-[var(--text-dim)]" :title="stats.captions.lastError">({{ stats.captions.lastError }})</span>
-            <button class="ml-2" @click="clearFailedCaptions">Dismiss</button>
-          </template>
-        </p>
-        <button class="mt-3" @click="confirmCaptions = true">Caption all songs…</button>
-      </section>
-
-      <section class="glass panel">
         <h2>Integrity check</h2>
         <p class="text-sm text-[var(--text-dim)]">
           Asks Telegram for every song and cover file (without downloading them) and lists the ones that can't be
@@ -328,20 +268,6 @@ function problemLink(p: FileProblem) {
         </div>
       </section>
     </template>
-
-    <ConfirmDialog
-      v-if="confirmCaptions"
-      title="Caption all songs?"
-      confirm-label="Start"
-      @confirm="startCaptions"
-      @close="confirmCaptions = false"
-    >
-      <p>
-        Queues a caption update for all {{ stats?.songCount.toLocaleString() }} songs — only needed once, for songs
-        uploaded before captions existed. It runs in the background at about 300 songs an hour.
-      </p>
-      <p class="text-[var(--text-dim)]">The bot needs to be allowed to edit its messages in the channel.</p>
-    </ConfirmDialog>
 
     <ConfirmDialog
       v-if="confirmTrash"

@@ -47,11 +47,11 @@ export async function deleteCacheEntries(db: D1Database, keys: string[]): Promis
     .run();
 }
 
-export async function getTotalCacheBytes(db: D1Database): Promise<number> {
-  const row = await db
-    .prepare(`SELECT COALESCE(SUM(size), 0) as total FROM cache_entries`)
-    .first<{ total: number }>();
-  return row?.total ?? 0;
+// From cache_total, which triggers keep in step with cache_entries (see
+// db/schema.sql) — one row read instead of the whole table.
+export async function getCacheTotals(db: D1Database): Promise<{ entries: number; bytes: number }> {
+  const row = await db.prepare(`SELECT entries, bytes FROM cache_total WHERE id = 1`).first<{ entries: number; bytes: number }>();
+  return { entries: row?.entries ?? 0, bytes: row?.bytes ?? 0 };
 }
 
 // Oldest-accessed first, for LRU eviction.

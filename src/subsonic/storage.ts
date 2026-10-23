@@ -2,7 +2,7 @@
 // file can still be fetched from Telegram.
 import * as q from "../db/queries";
 import type { StorageBackend } from "../storage/types";
-import { captionStatus, type CaptionStatus } from "./captions";
+import { getCacheTotals } from "../db/cache";
 
 export interface Bucket {
   name: string;
@@ -21,7 +21,6 @@ export interface StorageStats {
   trash: { entries: number; songCount: number; size: number };
   pendingDeletes: number;
   cache: { enabled: boolean; size: number; entries: number; maxBytes: number };
-  captions: CaptionStatus;
   largest: q.TrackRow[];
 }
 
@@ -30,7 +29,7 @@ export async function storageStats(
   cacheEnabled: boolean,
   cacheMaxBytes: number,
 ): Promise<StorageStats> {
-  const [totals, folders, formats, months, covers, trash, pending, cached, captions, largest] = await Promise.all([
+  const [totals, folders, formats, months, covers, trash, pending, cached, largest] = await Promise.all([
     db
       .prepare(`SELECT COUNT(*) as n, COALESCE(SUM(size), 0) as size, COALESCE(SUM(duration), 0) as duration FROM tracks`)
       .first<{ n: number; size: number; duration: number }>(),
@@ -64,10 +63,7 @@ export async function storageStats(
       .prepare(`SELECT COUNT(*) as entries, COALESCE(SUM(song_count), 0) as songCount, COALESCE(SUM(size), 0) as size FROM trash`)
       .first<StorageStats["trash"]>(),
     db.prepare(`SELECT COUNT(*) as n FROM pending_deletes`).first<{ n: number }>(),
-    cacheEnabled
-      ? db.prepare(`SELECT COUNT(*) as n, COALESCE(SUM(size), 0) as size FROM cache_entries`).first<{ n: number; size: number }>()
-      : Promise.resolve(null),
-    captionStatus(db),
+    cacheEnabled ? getCacheTotals(db) : Promise.resolve(null),
     q.listLargestTracks(db, 10),
   ]);
   return {
@@ -80,8 +76,7 @@ export async function storageStats(
     covers: covers ?? { albums: 0, albumsWithCover: 0, artistsWithPhoto: 0, songCovers: 0 },
     trash: trash ?? { entries: 0, songCount: 0, size: 0 },
     pendingDeletes: pending?.n ?? 0,
-    cache: { enabled: cacheEnabled, size: cached?.size ?? 0, entries: cached?.n ?? 0, maxBytes: cacheMaxBytes },
-    captions,
+    cache: { enabled: cacheEnabled, size: cached?.bytes ?? 0, entries: cached?.entries ?? 0, maxBytes: cacheMaxBytes },
     largest,
   };
 }
