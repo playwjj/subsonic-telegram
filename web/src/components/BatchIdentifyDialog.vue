@@ -24,9 +24,9 @@ const emit = defineEmits<{ close: []; done: [] }>();
 
 const MAX_SONGS = 300;
 const CANDIDATES = 6;
-// Between searches: each one is up to three iTunes requests, and Apple
-// allows roughly 20 a minute.
-const SEARCH_GAP_MS = 1500;
+// Between searches: each is usually one iTunes request (from this browser,
+// see api/itunes.ts), and Apple allows roughly 20 a minute per IP.
+const SEARCH_GAP_MS = 3000;
 const RATE_LIMIT_PAUSE_S = 30;
 
 interface Row {

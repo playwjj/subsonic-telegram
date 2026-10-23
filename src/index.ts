@@ -43,6 +43,19 @@ const DEFAULT_CACHE_MAX_BYTES = 8 * 1024 * 1024 * 1024;
 // web UI are held to this tighter limit, not the storage layer's looser one.
 const MAX_UPLOAD_TRACK_BYTES = 19 * 1024 * 1024;
 
+// A JSON-valued param (an array), or undefined when absent.
+function jsonParam<T extends unknown[]>(params: URLSearchParams, key: string): T | undefined {
+  const raw = params.get(key);
+  if (raw === null) return undefined;
+  try {
+    const value = JSON.parse(raw);
+    if (Array.isArray(value)) return value as T;
+  } catch {
+    // reported below
+  }
+  throw new metadata.MetadataError(`Invalid ${key}`);
+}
+
 // uploadTrack's optional "folder" param (may have several segments).
 function sanitizeFolderPath(input: string): string {
   return input
@@ -1036,10 +1049,15 @@ export default {
       // online…": kind=album (artist, album) or kind=song (artist, title).
       case "searchOnline": {
         const kind = params.get("kind") === "song" ? "song" : "album";
+        // The web UI fetches iTunes itself and passes its answer on
+        // (itunes=, or itunesError=); see src/subsonic/online.ts.
         const { matches, errors } = await online.searchOnline(
           kind,
           params.get("artist") ?? "",
           params.get(kind === "song" ? "title" : "album") ?? "",
+          params.has("itunes") || params.has("itunesError")
+            ? { batches: jsonParam<online.ItunesBatch[]>(params, "itunes"), error: params.get("itunesError") ?? undefined }
+            : undefined,
         );
         return respond(
           subsonicSuccess(
@@ -1068,7 +1086,7 @@ export default {
       case "getOnlineAlbumTracks": {
         const ref = params.get("albumRef");
         if (!ref) return respond(subsonicError(ERR.MISSING_PARAM, "Missing albumRef"), format);
-        const tracks = await online.getOnlineAlbumTracks(ref, params.getAll("local"));
+        const tracks = await online.getOnlineAlbumTracks(ref, params.getAll("local"), jsonParam<online.ItunesItem[]>(params, "itunesTracks"));
         return respond(
           subsonicSuccess(node("onlineTracks", undefined, { lists: { track: tracks.map((t) => node("track", { ...t })) } })),
           format,

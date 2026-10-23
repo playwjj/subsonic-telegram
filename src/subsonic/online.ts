@@ -117,7 +117,10 @@ function yearOf(date: string | undefined): number | undefined {
 function storefronts(text: string): string[] {
   if (/[぀-ヿ]/.test(text)) return ["jp"];
   if (/[가-힯]/.test(text)) return ["kr"];
-  if (/\p{Script=Han}/u.test(text)) return ["cn", "tw", "hk"];
+  // The cn storefront answered nothing for any of a dozen well-known
+  // Mandopop/Cantopop searches; tw had them all. hk is only asked when tw
+  // has nothing.
+  if (/\p{Script=Han}/u.test(text)) return ["tw", "hk"];
   return ["us"];
 }
 
@@ -153,7 +156,7 @@ async function getJson<T>(url: string, source: string): Promise<T | null> {
   }
 }
 
-interface ItunesItem {
+export interface ItunesItem {
   wrapperType?: string;
   collectionId: number;
   collectionName: string;
@@ -173,18 +176,39 @@ function itunesArtwork(url: string | undefined, size: number): string | undefine
   return url?.replace(/\d+x\d+bb/, `${size}x${size}bb`);
 }
 
-async function searchItunes(kind: "album" | "song", artist: string, name: string): Promise<OnlineMatch[]> {
-  const term = [artist, name].filter(Boolean).join(" ");
-  const countries = storefronts(term);
-  const results = await Promise.allSettled(
-    countries.map(async (country) => {
-      const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=${kind}&limit=10&country=${country}`;
-      const data = await getJson<{ results: ItunesItem[] }>(url, "iTunes");
-      return (data?.results ?? []).map((r) => ({ country, r }));
-    }),
-  );
-  // Only an error if every storefront failed.
-  if (results.every((r) => r.status === "rejected")) throw (results[0] as PromiseRejectedResult).reason;
+// iTunes answers as fetched by the browser (see web/src/api/itunes.ts):
+// from a Worker, Apple refuses most requests — Workers share outgoing IPs,
+// and it rate-limits per IP — while the user's own browser gets through.
+export interface ItunesBatch {
+  country: string;
+  results: ItunesItem[];
+}
+
+// The storefronts in order, the next one only when the one before had
+// nothing — usually a single request.
+async function fetchItunes(kind: "album" | "song", term: string): Promise<ItunesBatch[]> {
+  for (const country of storefronts(term)) {
+    const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=${kind}&limit=10&country=${country}`;
+    const data = await getJson<{ results: ItunesItem[] }>(url, "iTunes");
+    if (data?.results.length) return [{ country, results: data.results }];
+  }
+  return [];
+}
+
+async function searchItunes(
+  kind: "album" | "song",
+  artist: string,
+  name: string,
+  given?: { batches?: ItunesBatch[]; error?: string },
+): Promise<OnlineMatch[]> {
+  if (given?.error && !given.batches?.length) throw new SourceError(given.error);
+  // Fetched here only for a client that didn't (any Subsonic client
+  // calling this directly), with the odds above.
+  const batches = given?.batches ?? (await fetchItunes(kind, [artist, name].filter(Boolean).join(" ")));
+  const results = batches.map((b) => ({
+    status: "fulfilled" as const,
+    value: (Array.isArray(b.results) ? b.results : []).map((r) => ({ country: String(b.country), r })),
+  }));
 
   const seen = new Set<string>();
   const out: OnlineMatch[] = [];
@@ -341,11 +365,12 @@ export async function searchOnline(
   kind: "album" | "song",
   artist: string,
   name: string,
+  itunes?: { batches?: ItunesBatch[]; error?: string },
 ): Promise<{ matches: OnlineMatch[]; errors: string[] }> {
   artist = artist.trim();
   name = kind === "song" ? cleanTitle(name.trim()) : name.trim();
   if (!artist && !name) throw new MetadataError("Nothing to search for");
-  const results = await Promise.allSettled([searchItunes(kind, artist, name), searchMusicBrainz(kind, artist, name)]);
+  const results = await Promise.allSettled([searchItunes(kind, artist, name, itunes), searchMusicBrainz(kind, artist, name)]);
   const matches: OnlineMatch[] = [];
   const errors: string[] = [];
   for (const r of results) {
@@ -371,14 +396,18 @@ export async function searchOnline(
 
 // The track list of a match's album, each matched (by title) to one of the
 // library's songs, so an album match can fill in track/disc numbers.
-export async function getOnlineAlbumTracks(albumRef: string, local: string[]): Promise<OnlineTrack[]> {
+// `itunesTracks`: the iTunes lookup as fetched by the browser (see
+// searchItunes); fetched here otherwise.
+export async function getOnlineAlbumTracks(albumRef: string, local: string[], itunesTracks?: ItunesItem[]): Promise<OnlineTrack[]> {
   let tracks: OnlineTrack[];
   const itunes = /^([a-z]{2}):(\d+)$/.exec(albumRef);
   if (itunes) {
-    const data = await getJson<{ results: ItunesItem[] }>(
-      `https://itunes.apple.com/lookup?id=${itunes[2]}&entity=song&country=${itunes[1]}`,
-      "iTunes",
-    ).catch(rethrow);
+    const data = itunesTracks
+      ? { results: itunesTracks }
+      : await getJson<{ results: ItunesItem[] }>(
+          `https://itunes.apple.com/lookup?id=${itunes[2]}&entity=song&country=${itunes[1]}`,
+          "iTunes",
+        ).catch(rethrow);
     tracks = (data?.results ?? [])
       .filter((r) => r.wrapperType === "track" && r.trackName)
       .map((r) => ({

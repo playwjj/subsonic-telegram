@@ -3,6 +3,8 @@
 // Subsonic client uses, just from a browser instead of a native app.
 import { reactive } from "vue";
 import { credentialsFor, getCredentials, setCredentials, type Credentials } from "../stores/auth";
+import { prepareCover } from "../utils/image";
+import { fetchCoverBlob, itunesAlbumTracks, itunesSearch } from "./itunes";
 
 const CLIENT_NAME = "subsonic-telegram-web";
 const API_VERSION = "1.16.1";
@@ -645,6 +647,12 @@ export async function setCoverArt(
   image: Blob | string | null,
   opts: { onlyIfMissing?: boolean } = {},
 ): Promise<boolean> {
+  // A URL is downloaded here when the source allows it (Apple's image CDN
+  // does; see api/itunes.ts), else by the Worker.
+  if (typeof image === "string") {
+    const fetched = await fetchCoverBlob(image);
+    if (fetched) image = await prepareCover(fetched).catch(() => image as string);
+  }
   const blob = image instanceof Blob ? image : null;
   const search = buildSearch(
     {
@@ -692,15 +700,23 @@ export interface OnlineTrack {
   match?: number;
 }
 
+// iTunes is asked from here, MusicBrainz by the Worker, which matches and
+// ranks both (see api/itunes.ts).
 export async function searchOnline(
   kind: "album" | "song",
   artist: string,
   name: string,
 ): Promise<{ matches: OnlineMatch[]; errors: string[] }> {
-  const body = await call<{ onlineMatches: { match?: OnlineMatch[]; error?: { message: string }[] } }>("searchOnline", {
+  // The same cleanup the Worker gives a song title (cleanTitle in
+  // src/subsonic/online.ts), so both sources search for the same thing.
+  const searched = kind === "song" ? name.trim().replace(/^\d{1,3}\s*[.\-_、]\s*/, "").trim() || name.trim() : name.trim();
+  const itunes = await itunesSearch(kind, [artist.trim(), searched].filter(Boolean).join(" "));
+  const body = await callPost<{ onlineMatches: { match?: OnlineMatch[]; error?: { message: string }[] } }>("searchOnline", {
     kind,
     artist,
     [kind === "song" ? "title" : "album"]: name,
+    itunes: JSON.stringify(itunes.batches),
+    itunesError: itunes.error,
   });
   return {
     matches: body.onlineMatches.match ?? [],
@@ -718,7 +734,8 @@ export async function parseFileName(name: string, folder = ""): Promise<{ artist
 // `local`: the library's song titles; each returned track's `match` is an
 // index into it.
 export async function getOnlineAlbumTracks(albumRef: string, local: string[]): Promise<OnlineTrack[]> {
-  const body = await callPost<{ onlineTracks: { track?: OnlineTrack[] } }>("getOnlineAlbumTracks", { albumRef, local });
+  const itunesTracks = /^[a-z]{2}:\d+$/.test(albumRef) ? JSON.stringify(await itunesAlbumTracks(albumRef)) : undefined;
+  const body = await callPost<{ onlineTracks: { track?: OnlineTrack[] } }>("getOnlineAlbumTracks", { albumRef, local, itunesTracks });
   return body.onlineTracks.track ?? [];
 }
 
