@@ -81,6 +81,7 @@ npm run db:migrate:remote
 | `src/index.ts` | Worker 入口，按 `/rest/<endpoint>.view` 路由，先鉴权再分发 |
 | `src/auth.ts` | Subsonic 鉴权（token 或明文密码，账号密码来自 `AUTH_USERNAME`/`AUTH_PASSWORD` 这两个 Worker secrets，不落库），`src/md5.ts` 是配套的无依赖 MD5 实现（Web Crypto 不支持 MD5） |
 | `src/subsonic/` | 响应构建（`node.ts`/`response.ts`，同一套树可以序列化成 JSON 或 XML）、各端点的业务逻辑 |
+| `src/telegramConfig.ts` | 决定用哪个 bot 和频道：`TG_BOT_TOKEN`/`TG_CHANNEL_ID` secrets，或者 Web 界面 Telegram storage 页面存进 D1 的配置（`src/subsonic/telegramSetup.ts`） |
 | `src/db/queries.ts` | 所有 D1 查询 |
 | `src/storage/` | 存储后端接口 + Telegram 实现，外加可选的 R2 缓存（`cached.ts`） |
 | `db/schema.sql` | D1 表结构 |
@@ -143,8 +144,10 @@ npm run db:migrate:remote
 
 这一步对新手最容易卡住，跟 Cloudflare 完全无关，纯 Telegram 操作。做完你会拿到两个值——`TG_BOT_TOKEN` 和 `TG_CHANNEL_ID`——部署时要填进 Worker Secrets（见下面第 4 步）。
 
+> **也可以让 Web 界面帮你找 channel id。** 不配置 `TG_BOT_TOKEN` / `TG_CHANNEL_ID` 这两个 secrets 时，登录 Web 界面后会进入 **Telegram storage** 页面。做完下面第 1、2 步后，把 bot token 贴进去，页面会列出最近 24 小时内 bot 被设为管理员的频道（也可以自己填频道 id 或 `@用户名`）。保存前会检查 bot 在该频道有没有发消息、编辑消息、删除消息的权限。token 和频道存在 D1 的 `settings` 表里，第 3 步就不用做了。配置了 secrets 时始终以 secrets 为准。库里已经有歌之后，页面不允许换成别的 bot 或频道（Telegram 的 file id 只对存它的那个 bot 有效），但同一个 bot 换新 token 是可以的。导入 / 修复封面脚本仍然从 `.env` 读取 `TG_BOT_TOKEN` / `TG_CHANNEL_ID`。
+
 1. **创建 Bot**：Telegram 里找 [@BotFather](https://t.me/BotFather)，发 `/newbot`，按提示起个显示名字和用户名（用户名必须以 `bot` 结尾）。BotFather 会回一段形如 `123456789:AAH...` 的字符串，这就是 `TG_BOT_TOKEN`——拿到它等于拿到这个 bot 的完全控制权，不要泄露、不要提交进仓库。
-2. **建一个私有频道**：Telegram 客户端里新建 Channel，类型选 **Private**（这个频道纯粹用来存音频文件本体，不需要也不建议公开）。建好后把第 1 步的 bot 加为频道管理员（Administrators → Add Admin），至少要勾选「发送消息」权限，不然后续上传会报错。如果想让 Web UI 的删除功能真的能把 Telegram 那边的文件也删掉，再勾上「删除消息」权限——不勾的话，删除操作照样会把这首歌从库（D1）里移除，只是 Telegram 那条消息会留着，跟 `npm run import` 被中断时留下的残留消息是同一类无害垃圾。
+2. **建一个私有频道**：Telegram 客户端里新建 Channel，类型选 **Private**（这个频道纯粹用来存音频文件本体，不需要也不建议公开）。建好后把第 1 步的 bot 加为频道管理员（Administrators → Add Admin），「发送消息」「编辑他人消息」「删除他人消息」三项权限都要勾上：发送消息用来上传文件，编辑消息用来在移动、改名后更新每首歌的 caption（路径和 id），删除消息用来在彻底删除歌曲时把 Telegram 里的文件也删掉。缺任何一项，Web 界面的 Telegram storage 页面都不会保存这个 bot。
 3. **拿到频道的 `chat_id`（即 `TG_CHANNEL_ID`）**：频道的 chat_id 是一个 `-100` 开头的负数长整数，跟频道的 `@用户名` 不是一回事，必须转成这个数字。两种拿法：
    - 最简单：往频道里随便发一条消息，把它转发给 [@getidsbot](https://t.me/getidsbot)（或任意同类 "get chat id" bot），它会直接告诉你带 `-100` 前缀的完整 chat_id。
    - 或者手动查：确保 bot 已经是频道管理员，在频道里发一条消息，然后浏览器打开 `https://api.telegram.org/bot<TG_BOT_TOKEN>/getUpdates`，在返回的 JSON 里找 `channel_post.chat.id`，就是 `TG_CHANNEL_ID`。
@@ -182,7 +185,7 @@ Git 集成是从仓库里的 `wrangler.toml` 读配置的，占位符不改掉�
     -d "$(jq -Rs '{sql: .}' db/schema.sql)"
   ```
 
-**4. 配置 Worker Secrets**（跟代码无关，不会因为 git push 而设置，也绝对不能写进仓库）：Telegram 凭据（`TG_BOT_TOKEN`/`TG_CHANNEL_ID`，见上面 [准备工作：创建 Telegram Bot 和频道](#准备工作创建-telegram-bot-和频道)）+ 登录账号（`AUTH_USERNAME`/`AUTH_PASSWORD`，Subsonic 客户端登录用，自己随便定用户名密码即可，仅限个人单用户部署）
+**4. 配置 Worker Secrets**（跟代码无关，不会因为 git push 而设置，也绝对不能写进仓库）：Telegram 凭据（`TG_BOT_TOKEN`/`TG_CHANNEL_ID`，见上面 [准备工作：创建 Telegram Bot 和频道](#准备工作创建-telegram-bot-和频道)；也可以不配，改在 Web 界面的 Telegram storage 页面里设置）+ 登录账号（`AUTH_USERNAME`/`AUTH_PASSWORD`，Subsonic 客户端登录用，自己随便定用户名密码即可，仅限个人单用户部署）
 
 二选一：
 - 本地跑（要求 `wrangler whoami` 登录的就是跟 Git 集成同一个账号）：

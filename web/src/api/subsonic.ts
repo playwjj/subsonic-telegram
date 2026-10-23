@@ -859,3 +859,36 @@ export async function checkFiles(kind: "songs" | "covers", after: string): Promi
   const r = body.fileCheck;
   return { checked: r.checked, total: r.total, next: r.next, problems: r.problem ?? [] };
 }
+
+// --- Telegram setup (the Setup page) ---
+
+export interface TelegramSetup {
+  // "env": set by the Worker's TG_BOT_TOKEN / TG_CHANNEL_ID secrets;
+  // "setup": saved from the Setup page; "none": not set up yet.
+  source: "env" | "setup" | "none";
+  botUsername?: string;
+  channelId?: string;
+  channelTitle?: string;
+  // Why a different bot or channel can't be picked: "env" (secrets) or
+  // "library" (songs are stored with the current ones).
+  locked?: "env" | "library";
+}
+
+export async function getTelegramSetup(): Promise<TelegramSetup> {
+  const body = await call<{ telegramSetup: TelegramSetup }>("getTelegramSetup");
+  return body.telegramSetup;
+}
+
+// A bot token's username, and the channels it was made admin of lately.
+export async function checkTelegramBot(token: string): Promise<{ username: string; channels: { id: string; title: string }[] }> {
+  const body = await callPost<{ telegramBot: { username: string; channel?: { id: string; title: string }[] } }>(
+    "checkTelegramBot",
+    { token },
+  );
+  return { username: body.telegramBot.username, channels: body.telegramBot.channel ?? [] };
+}
+
+export async function saveTelegramSetup(token: string, channel: string): Promise<TelegramSetup> {
+  const body = await callPost<{ telegramSetup: TelegramSetup }>("saveTelegramSetup", { token, channel });
+  return body.telegramSetup;
+}

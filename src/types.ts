@@ -1,8 +1,10 @@
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
-  TG_BOT_TOKEN: string;
-  TG_CHANNEL_ID: string;
+  // Optional: without them, the bot and channel come from the web UI's
+  // setup page (see src/telegramConfig.ts).
+  TG_BOT_TOKEN?: string;
+  TG_CHANNEL_ID?: string;
   AUTH_USERNAME: string;
   AUTH_PASSWORD: string;
   // Both optional: only set when the R2 read-through cache (src/storage/cached.ts)

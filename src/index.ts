@@ -27,6 +27,8 @@ import { CachedStorage, cacheKey } from "./storage/cached";
 import * as cache from "./db/cache";
 import * as trashDb from "./db/trash";
 import type { StorageBackend } from "./storage/types";
+import { getTelegramConfig, StorageNotConfiguredError, UnconfiguredStorage } from "./telegramConfig";
+import * as telegramSetup from "./subsonic/telegramSetup";
 
 const ERR = {
   MISSING_PARAM: 10,
@@ -82,9 +84,12 @@ const RANDOM_SONGS_RECENT_POOL = 100;
 const SIMILAR_SONGS_ARTIST_RATIO = 0.6;
 
 // Telegram, behind the optional R2 read-through cache when CACHE_BUCKET is
-// bound (see wrangler.toml).
-function makeStorage(env: Env, ctx: ExecutionContext): StorageBackend {
-  const telegram = new TelegramStorage(env.TG_BOT_TOKEN, env.TG_CHANNEL_ID);
+// bound (see wrangler.toml). Before Telegram is set up (src/telegramConfig.ts),
+// a stand-in that fails every file operation.
+async function makeStorage(env: Env, ctx: ExecutionContext): Promise<StorageBackend> {
+  const config = await getTelegramConfig(env);
+  if (!config) return new UnconfiguredStorage();
+  const telegram = new TelegramStorage(config.botToken, config.channelId);
   return env.CACHE_BUCKET
     ? new CachedStorage(
         telegram,
@@ -156,7 +161,7 @@ export default {
     if (endpoint === "getLicense") {
       return respond(subsonicSuccess(node("license", { valid: true })), format);
     }
-    const storage = makeStorage(env, ctx);
+    const storage = await makeStorage(env, ctx);
     if (LIBRARY_COUNT_CHANGES.has(endpoint)) q.forgetLibraryStats();
 
     try {
@@ -944,7 +949,7 @@ export default {
         const track = await q.getTrack(env.DB, id);
         if (!track) return respond(subsonicError(ERR.NOT_FOUND, "Song not found"), format);
         const { messageId } = JSON.parse(track.file_ref) as { messageId: number };
-        const channel = env.TG_CHANNEL_ID;
+        const channel = (await getTelegramConfig(env))?.channelId ?? "";
         const link = channel.startsWith("-100")
           ? `https://t.me/c/${channel.slice(4)}/${messageId}`
           : channel.startsWith("@")
@@ -1187,10 +1192,39 @@ export default {
         return respond(subsonicSuccess(node("captions", { ...(await captions.captionStatus(env.DB)) })), format);
       }
 
+      // The Telegram setup page (src/subsonic/telegramSetup.ts). Tokens
+      // come as POST form fields, so they stay out of URLs and logs.
+      case "getTelegramSetup":
+        return respond(subsonicSuccess(node("telegramSetup", { ...(await telegramSetup.setupStatus(env)) })), format);
+
+      case "checkTelegramBot": {
+        const token = params.get("token");
+        if (!token) return respond(subsonicError(ERR.MISSING_PARAM, "Missing token"), format);
+        const bot = await telegramSetup.checkBot(token);
+        const channels = await telegramSetup.findChannels(token);
+        return respond(
+          subsonicSuccess(
+            node("telegramBot", { username: bot.username }, { lists: { channel: channels.map((c) => node("channel", c)) } }),
+          ),
+          format,
+        );
+      }
+
+      case "saveTelegramSetup": {
+        const token = params.get("token");
+        const channel = params.get("channel");
+        if (!token || !channel) return respond(subsonicError(ERR.MISSING_PARAM, "Missing token or channel"), format);
+        const status = await telegramSetup.saveSetup(env, token, channel);
+        return respond(subsonicSuccess(node("telegramSetup", { ...status })), format);
+      }
+
       default:
         return respond(subsonicError(0, `Unsupported endpoint: ${endpoint}`), format);
       }
     } catch (err) {
+      if (err instanceof telegramSetup.SetupError || err instanceof StorageNotConfiguredError) {
+        return respond(subsonicError(0, err.message), format);
+      }
       if (err instanceof folders.FolderError) return respond(subsonicError(err.code, err.message), format);
       if (err instanceof metadata.MetadataError) return respond(subsonicError(0, err.message), format);
       // Surface the real D1/storage error as a Subsonic error response
@@ -1208,7 +1242,8 @@ export default {
   // earlier and drops queued captions of deleted songs. Every few minutes:
   // works off the caption queue.
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    const storage = makeStorage(env, ctx);
+    if (!(await getTelegramConfig(env))) return;
+    const storage = await makeStorage(env, ctx);
     if (controller.cron === DAILY_CRON) {
       await trash.dailyCleanup(env.DB, storage, retentionDays(env));
       await captions.pruneCaptionQueue(env.DB);

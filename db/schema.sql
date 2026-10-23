@@ -200,3 +200,11 @@ CREATE TABLE IF NOT EXISTS caption_queue (
 );
 -- The cron's next batch, without reading the rest of the queue.
 CREATE INDEX IF NOT EXISTS idx_caption_queue_next ON caption_queue(attempts, queued_at);
+
+-- Telegram storage set up from the web UI (src/telegramConfig.ts), for a
+-- deployment without TG_BOT_TOKEN / TG_CHANNEL_ID secrets. Keys:
+-- bot_token, channel_id, bot_username, channel_title.
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);

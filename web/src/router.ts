@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { isLoggedIn } from "./stores/auth";
+import { isStorageConfigured } from "./stores/telegramSetup";
 
 const routes = [
   { path: "/login", name: "login", component: () => import("./views/LoginView.vue") },
@@ -15,6 +16,7 @@ const routes = [
     props: true,
   },
   { path: "/trash", name: "trash", component: () => import("./views/TrashView.vue") },
+  { path: "/setup", name: "setup", component: () => import("./views/SetupView.vue") },
   { path: "/storage", name: "storage", component: () => import("./views/StorageView.vue") },
   { path: "/duplicates", name: "duplicates", component: () => import("./views/DuplicatesView.vue") },
   { path: "/favorites", name: "favorites", component: () => import("./views/FavoritesView.vue") },
@@ -34,9 +36,10 @@ const router = createRouter({
   routes,
 });
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   if (to.name !== "login" && !isLoggedIn()) return { name: "login", query: { redirect: to.fullPath } };
   if (to.name === "login" && isLoggedIn()) return { name: "home" };
+  if (to.name !== "login" && to.name !== "setup" && !(await isStorageConfigured())) return { name: "setup" };
 });
 
 // Every deploy renames the view chunks, and a missing one comes back as the

@@ -221,6 +221,11 @@ function problemLink(p: FileProblem) {
           </div>
           <div class="sub">{{ stats.covers.artistsWithPhoto }} artist photos · {{ stats.covers.songCovers }} song covers</div>
         </div>
+        <RouterLink :to="{ name: 'setup' }" class="card glass">
+          <div class="label">Telegram</div>
+          <div class="value">Bot &amp; channel</div>
+          <div class="sub">Where the files are stored</div>
+        </RouterLink>
       </div>
 
       <div class="grid gap-5 lg:grid-cols-2">
