@@ -118,7 +118,7 @@ const starred = computed(() => !!currentTrack.value?.starred);
         <input type="range" min="0" max="1" step="0.01" :value="playerState.volume" @input="onVolume" />
       </div>
       <div class="window-btns">
-        <button class="win-btn" title="Maximize" @click="setView('full')">⤢</button>
+        <button class="win-btn maximize" title="Maximize" @click="setView('full')">⤢</button>
         <button class="win-btn" title="Minimize" @click="setView('mini')">–</button>
         <button class="win-btn" title="Close" @click="closePlayer">✕</button>
       </div>
@@ -295,18 +295,20 @@ const starred = computed(() => !!currentTrack.value?.starred);
   background: var(--surface-hover);
 }
 
-/* Phones: one row can't fit everything (it used to push the playback
+/* Phones and narrow tablets: one row can't fit everything (it used to push the playback
    controls off the right edge), so wrap into two — cover/title/♥/controls
    on top, progress bar + lyrics/queue below. The progress row's 60% basis
    is what forces the wrap; it then grows to fill the second line. */
-@media (max-width: 600px) {
+@media (max-width: 760px) {
   .player-bar {
     flex-wrap: wrap;
     gap: 0.4rem 0.5rem;
     padding: 0.5rem 0.75rem;
   }
+  /* 40% basis so on wider screens the progress row still wraps below
+     instead of squeezing the title. */
   .meta {
-    flex: 1 1 0;
+    flex: 1 1 40%;
     min-width: 0;
     max-width: none;
   }
@@ -323,7 +325,7 @@ const starred = computed(() => !!currentTrack.value?.starred);
   }
   .progress {
     order: 1;
-    flex: 1 1 60%;
+    flex: 1 1 50%;
     gap: 0.5rem;
   }
   .extra,
@@ -332,11 +334,16 @@ const starred = computed(() => !!currentTrack.value?.starred);
   }
   .window-btns {
     margin-left: 0;
-    padding-left: 0.25rem;
+    padding-left: 0;
+    border-left: none;
   }
-  /* Rating stays available on every track row; phones use hardware volume. */
+  /* Rating stays available on every track row; phones use hardware volume.
+     Shuffle/repeat and maximize live in the full player (tap the cover or
+     title), which keeps this bar to two rows. */
   .rating-slot,
-  .volume {
+  .volume,
+  .controls .mode-btn,
+  .win-btn.maximize {
     display: none;
   }
 }

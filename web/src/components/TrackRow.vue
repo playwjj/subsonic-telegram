@@ -28,6 +28,11 @@ async function toggleStar() {
   }
 }
 
+// Phones hide the ▶ button (no room), so tapping the title plays instead.
+function playFromInfo() {
+  if (window.matchMedia("(max-width: 600px)").matches) emit("play");
+}
+
 function formatDuration(sec?: number): string {
   if (sec === undefined) return "--:--";
   const m = Math.floor(sec / 60);
@@ -39,19 +44,22 @@ function formatDuration(sec?: number): string {
 <template>
   <div class="track-row">
     <button class="play-btn" title="Play" @click="emit('play')">▶</button>
-    <img
-      v-if="song.coverArt"
-      class="cover"
-      :src="coverArtUrl(song.coverArt)"
-      :alt="`${song.album} cover`"
-      @error="($event.target as HTMLImageElement).style.display = 'none'"
-    />
-    <div class="info">
+    <button class="cover-btn" title="Play" @click="emit('play')">
+      <img
+        v-if="song.coverArt"
+        class="cover"
+        :src="coverArtUrl(song.coverArt)"
+        :alt="`${song.album} cover`"
+        @error="($event.target as HTMLImageElement).style.display = 'none'"
+      />
+      <span class="cover-play">▶</span>
+    </button>
+    <div class="info" @click="playFromInfo">
       <div class="title">{{ song.title }}</div>
       <div class="artist">{{ song.artist }}</div>
     </div>
     <div class="duration">{{ formatDuration(song.duration) }}</div>
-    <StarRating :song="song" />
+    <StarRating class="wide-only" :song="song" />
     <button
       class="heart-btn"
       :class="{ starred }"
@@ -60,10 +68,22 @@ function formatDuration(sec?: number): string {
     >
       {{ starred ? "♥" : "♡" }}
     </button>
-    <QueueMenu :song="song" />
+    <QueueMenu :song="song">
+      <!-- Phones: the rating and edit/delete buttons don't fit on the row,
+           so they live in this menu instead. -->
+      <template #default="{ close }">
+        <div class="narrow-only menu-rating">
+          <span>Rate</span>
+          <StarRating :song="song" />
+        </div>
+        <button v-if="editable" class="option narrow-only" @click="close(); emit('edit')">Edit tags…</button>
+        <button v-if="deletable" class="option narrow-only" @click="close(); emit('delete')">Move to trash</button>
+        <slot name="menu" :close="close" />
+      </template>
+    </QueueMenu>
     <AddToPlaylistMenu :song-id="song.id" />
-    <button v-if="editable" class="delete-btn" title="Edit tags" @click="emit('edit')">✎</button>
-    <button v-if="deletable" class="delete-btn" title="Move to trash" @click="emit('delete')">🗑</button>
+    <button v-if="editable" class="delete-btn wide-only" title="Edit tags" @click="emit('edit')">✎</button>
+    <button v-if="deletable" class="delete-btn wide-only" title="Move to trash" @click="emit('delete')">🗑</button>
   </div>
 </template>
 
@@ -77,9 +97,34 @@ function formatDuration(sec?: number): string {
 .track-row + .track-row {
   border-top: 1px solid var(--border);
 }
-.cover {
+.cover-btn {
+  position: relative;
+  flex-shrink: 0;
   width: 3rem;
   height: 3rem;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-hover);
+  line-height: 0;
+}
+.cover-play {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.35);
+}
+.cover-btn:hover .cover-play {
+  display: flex;
+}
+.cover {
+  width: 100%;
+  height: 100%;
   object-fit: cover;
   border-radius: 6px;
   background: var(--surface-hover);
@@ -145,6 +190,27 @@ function formatDuration(sec?: number): string {
   color: #e0245e;
   opacity: 1;
 }
+.option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  background: none;
+  border: none;
+  border-radius: 4px;
+}
+.option:hover {
+  background: var(--surface-hover);
+}
+.menu-rating {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0.5rem;
+}
+.narrow-only {
+  display: none;
+}
 .delete-btn {
   display: flex;
   align-items: center;
@@ -159,5 +225,36 @@ function formatDuration(sec?: number): string {
   color: inherit;
   cursor: pointer;
   flex-shrink: 0;
+}
+
+/* Phones: drop the ▶ button (the cover plays, with a ▶ overlay), tighten
+   gaps and move rating/edit/delete into the ⋯ menu so the title keeps room. */
+@media (max-width: 600px) {
+  .track-row {
+    gap: 0.5rem;
+  }
+  .play-btn,
+  .wide-only {
+    display: none;
+  }
+  .cover-btn {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+  .cover-play {
+    display: flex;
+  }
+  .info {
+    cursor: pointer;
+  }
+  .duration {
+    font-size: 0.8rem;
+  }
+  .narrow-only {
+    display: flex;
+  }
+  .option.narrow-only {
+    display: block;
+  }
 }
 </style>

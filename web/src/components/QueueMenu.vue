@@ -21,6 +21,7 @@ function choose(action: (song: Song) => void) {
       <button class="option" @click="choose(playNext)">Play next</button>
       <button class="option" @click="choose(addToQueue)">Add to queue</button>
       <button class="option" @click="choose(findSongOnline)">Find online…</button>
+      <slot :close="() => (open = false)" />
     </div>
   </div>
 </template>

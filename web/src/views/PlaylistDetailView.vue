@@ -65,11 +65,15 @@ async function removePlaylist() {
     <p v-if="!playlist.entry.length">No songs yet — add some from the album/search views.</p>
     <div v-else class="glass p-2">
       <div v-for="(song, i) in playlist.entry" :key="`${song.id}-${i}`" class="row">
-        <TrackRow :song="song" @play="playFrom(i)" />
+        <TrackRow :song="song" @play="playFrom(i)">
+          <template #menu="{ close }">
+            <button class="menu-remove" @click="close(); removeAt(i)">Remove from playlist</button>
+          </template>
+        </TrackRow>
         <div class="reorder">
-          <button :disabled="i === 0" @click="move(i, -1)">↑</button>
-          <button :disabled="i === playlist.entry.length - 1" @click="move(i, 1)">↓</button>
-          <button @click="removeAt(i)">✕</button>
+          <button :disabled="i === 0" title="Move up" @click="move(i, -1)">↑</button>
+          <button :disabled="i === playlist.entry.length - 1" title="Move down" @click="move(i, 1)">↓</button>
+          <button class="remove" title="Remove from playlist" @click="removeAt(i)">✕</button>
         </div>
       </div>
     </div>
@@ -85,9 +89,13 @@ async function removePlaylist() {
   gap: 0.75rem;
   margin-bottom: 1rem;
 }
+.header h1 {
+  overflow-wrap: anywhere;
+}
 .actions {
   display: flex;
   gap: 0.5rem;
+  white-space: nowrap;
 }
 .danger {
   color: var(--danger);
@@ -126,5 +134,37 @@ async function removePlaylist() {
 .reorder button:disabled {
   opacity: 0.3;
   cursor: default;
+}
+.menu-remove {
+  display: none;
+  width: 100%;
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--danger);
+}
+.menu-remove:hover {
+  background: var(--surface-hover);
+}
+/* Phones: ↑/↓ stack into one narrow column and remove moves into the
+   row's ⋯ menu, so the song title keeps its room. */
+@media (max-width: 600px) {
+  .reorder {
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .reorder button {
+    width: 1.5rem;
+    height: 1.3rem;
+    font-size: 0.75rem;
+  }
+  .reorder .remove {
+    display: none;
+  }
+  .menu-remove {
+    display: block;
+  }
 }
 </style>

@@ -12,72 +12,84 @@
   color-scheme: dark;
 }
 
-* {
-  box-sizing: border-box;
-}
+/* In a layer so Tailwind utilities on an element (bg-transparent, p-0,
+   rounded-full…) win over these element defaults — unlayered, they'd beat
+   every utility regardless of specificity. */
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
 
-html,
-body {
-  margin: 0;
-  padding: 0;
-}
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+  }
 
-body {
-  background: var(--bg);
-  color: var(--text);
-  font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    sans-serif;
-}
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family:
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      Roboto,
+      sans-serif;
+  }
 
-#app {
-  min-height: 100vh;
-  position: relative;
-}
+  #app {
+    min-height: 100vh;
+    position: relative;
+  }
 
-a {
-  color: inherit;
-}
+  a {
+    color: inherit;
+  }
 
-button,
-input,
-select {
-  font: inherit;
-  color: inherit;
-}
+  /* Page titles — same weight everywhere, whether or not the view adds
+     its own utilities. */
+  h1 {
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
 
-button {
-  cursor: pointer;
-}
+  button,
+  input,
+  select {
+    font: inherit;
+    color: inherit;
+  }
 
-input,
-select {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.5rem 0.7rem;
-}
+  button {
+    cursor: pointer;
+  }
 
-button {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.5rem 0.9rem;
-  transition: background-color 0.15s ease;
-}
-button:hover {
-  background: var(--surface-hover);
-}
-button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
+  input,
+  select {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 0.7rem;
+  }
 
-.error {
-  color: var(--danger);
+  button {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 0.9rem;
+    transition: background-color 0.15s ease;
+  }
+  button:hover {
+    background: var(--surface-hover);
+  }
+  button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .error {
+    color: var(--danger);
+  }
 }
 
 /* Small inline loading indicator — pair with text like "Uploading…" so a
@@ -98,11 +110,14 @@ button:disabled {
   }
 }
 
-/* Frosted-glass panel, used across cards/dropdowns/the player bar. */
-.glass {
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--border);
-  border-radius: 16px;
+/* Frosted-glass panel, used across cards/dropdowns/the player bar. Layered
+   so a utility like rounded-xl can still override the radius. */
+@layer components {
+  .glass {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+  }
 }

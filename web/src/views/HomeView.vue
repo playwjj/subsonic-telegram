@@ -31,8 +31,10 @@ async function shuffle() {
 }
 
 function formatDuration(totalSeconds: number): string {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.round((totalSeconds % 3600) / 60);
+  // Round to whole minutes first, so 59.6 minutes can't show as "60m".
+  const totalMinutes = Math.round(totalSeconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
@@ -98,9 +100,9 @@ onMounted(async () => {
     </section>
 
     <section v-if="randomSongs.length">
-      <div class="mb-3 flex items-center justify-between">
-        <h2 class="text-sm font-medium text-[var(--text-dim)]">Random Songs</h2>
-        <div class="flex gap-2">
+      <div class="mb-3 flex items-center justify-between gap-3">
+        <h2 class="text-sm font-medium whitespace-nowrap text-[var(--text-dim)]">Random Songs</h2>
+        <div class="flex gap-2 whitespace-nowrap">
           <button class="text-xs" :disabled="shuffling" title="Show a different set of random songs" @click="shuffle">
             ↻ {{ shuffling ? "Loading…" : "New picks" }}
           </button>

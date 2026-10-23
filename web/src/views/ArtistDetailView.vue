@@ -44,7 +44,7 @@ async function onPhotoPicked(e: Event) {
     <div class="artist-header">
       <img v-if="artist.coverArt" :src="coverArtUrl(artist.coverArt)" :alt="`${artist.name} cover`" />
       <h1>{{ artist.name }}</h1>
-      <ShuffleButton class="ml-auto" :load="() => getShuffleSongs({ artistId: artist!.id })" />
+      <ShuffleButton class="ml-auto text-sm" :load="() => getShuffleSongs({ artistId: artist!.id })" />
       <button class="inline-flex items-center gap-2 text-sm" :disabled="uploadingPhoto" @click="photoInput?.click()">
         <span v-if="uploadingPhoto" class="spinner"></span> Change photo…
       </button>
@@ -77,10 +77,22 @@ async function onPhotoPicked(e: Event) {
 }
 .artist-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 1rem;
+  gap: 0.75rem 1rem;
+}
+/* The 8rem basis makes the buttons wrap to their own row on phones rather
+   than squeezing the name down to a character per line. */
+.artist-header h1 {
+  flex: 1 1 8rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.artist-header button {
+  white-space: nowrap;
 }
 .artist-header img {
+  flex-shrink: 0;
   width: 4rem;
   height: 4rem;
   border-radius: 50%;

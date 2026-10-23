@@ -1274,6 +1274,7 @@ const columns: { key: SortKey; label: string; class: string }[] = [
   font-variant-numeric: tabular-nums;
   color: var(--text-dim);
   text-align: right;
+  white-space: nowrap;
 }
 .sort.col-time,
 .sort.col-size {
@@ -1375,7 +1376,7 @@ const columns: { key: SortKey; label: string; class: string }[] = [
 }
 @media (max-width: 600px) {
   .row {
-    grid-template-columns: 1.25rem 2.25rem minmax(0, 1fr) 3.25rem 1.75rem;
+    grid-template-columns: 1.25rem 2.25rem minmax(0, 1fr) 4rem 1.75rem;
     gap: 0.5rem;
   }
   .col-size {

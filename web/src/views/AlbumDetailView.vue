@@ -71,15 +71,16 @@ async function handleDelete(song: Song) {
   <div v-if="album" class="album-detail">
     <div class="header glass mb-6 p-4">
       <img v-if="album.coverArt" class="cover" :src="coverArtUrl(album.coverArt)" :alt="album.name" />
+      <div v-else class="cover"></div>
       <div class="info">
         <h1>{{ album.name }}</h1>
         <RouterLink :to="{ name: 'artist', params: { id: album.artistId } }">{{ album.artist }}</RouterLink>
         <p class="meta">{{ album.songCount }} 首{{ album.year ? ` · ${album.year}` : "" }}</p>
-        <div class="flex gap-2">
-          <button @click="playFrom(0)">▶ Play album</button>
-          <button @click="shufflePlay(album.song)">🔀 Shuffle</button>
-          <button @click="editingAlbum = true">✎ Edit</button>
-        </div>
+      </div>
+      <div class="actions">
+        <button @click="playFrom(0)">▶ Play album</button>
+        <button @click="shufflePlay(album.song)">🔀 Shuffle</button>
+        <button @click="editingAlbum = true">✎ Edit</button>
       </div>
     </div>
     <div class="tracks glass p-2">
@@ -108,22 +109,58 @@ async function handleDelete(song: Song) {
 </template>
 
 <style scoped>
+/* Cover on the left, title/artist beside it, actions under the title — or,
+   on phones, in a full-width row under both so they don't squeeze the title. */
 .header {
-  display: flex;
-  gap: 1.25rem;
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  column-gap: 1.25rem;
   margin-bottom: 1.5rem;
-  flex-wrap: wrap;
 }
 .cover {
-  width: 10rem;
-  height: 10rem;
+  grid-row: span 2;
+  width: 100%;
+  aspect-ratio: 1;
   border-radius: 8px;
   object-fit: cover;
-  flex-shrink: 0;
+  background: var(--surface-hover);
+}
+h1 {
+  overflow-wrap: anywhere;
 }
 .meta {
   opacity: 0.7;
   font-size: 0.9rem;
   margin: 0.3rem 0 0.8rem;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-self: start;
+}
+.actions button {
+  white-space: nowrap;
+}
+@media (max-width: 600px) {
+  .header {
+    grid-template-columns: 6.5rem minmax(0, 1fr);
+    grid-template-rows: auto;
+    column-gap: 1rem;
+    align-items: center;
+  }
+  .cover {
+    grid-row: auto;
+  }
+  .actions {
+    grid-column: 1 / -1;
+    margin-top: 1rem;
+  }
+  .actions button {
+    flex: 1;
+    padding: 0.5rem 0.4rem;
+    font-size: 0.875rem;
+  }
 }
 </style>

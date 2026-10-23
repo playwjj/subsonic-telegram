@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { nextTick, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { isLoggedIn, logout } from "./stores/auth";
 import { playerState, currentTrack } from "./stores/player";
@@ -30,6 +31,17 @@ const navLinks = [
   { to: "/upload", label: "Upload" },
 ];
 
+// The phone nav scrolls sideways, so bring the current page's link into view
+// (e.g. after following an in-page link to Playlists).
+const linksEl = ref<HTMLElement | null>(null);
+watch(
+  () => route.path,
+  async () => {
+    await nextTick();
+    linksEl.value?.querySelector(".router-link-exact-active")?.scrollIntoView({ block: "nearest", inline: "center" });
+  },
+);
+
 async function handleLogout() {
   logout();
   await router.push({ name: "login" });
@@ -45,31 +57,47 @@ async function handleLogout() {
       <div class="absolute bottom-[-10rem] left-1/4 h-[30rem] w-[30rem] rounded-full bg-pink-500/10 blur-[110px]"></div>
     </div>
 
+    <!-- One row at every width: on phones the links scroll sideways (with a
+         faded right edge as the hint) instead of wrapping into a second row. -->
     <nav
       v-if="isLoggedIn() && route.name !== 'login'"
-      class="glass sticky top-0 z-20 mx-3 mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl px-4 py-3 sm:mx-4"
+      class="glass sticky top-2 z-20 mx-3 mt-3 flex items-center gap-3 rounded-2xl bg-[rgba(23,26,33,0.85)] px-3 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.35)] sm:mx-4 sm:gap-5 sm:px-4 sm:py-3"
     >
-      <RouterLink to="/" class="-my-1 mr-1 flex items-center gap-2 text-sm font-semibold text-[var(--text)]" title="Subgram">
+      <RouterLink to="/" class="-my-1 flex shrink-0 items-center gap-2 text-sm font-semibold text-[var(--text)]" title="Subgram">
         <AppLogo class="h-7 w-7" :spinning="playerState.isPlaying" />
-        <span class="max-[600px]:hidden">Subgram</span>
+        <span class="max-[760px]:hidden">Subgram</span>
       </RouterLink>
-      <RouterLink
-        v-for="link in navLinks"
-        :key="link.to"
-        :to="link.to"
-        class="text-sm text-[var(--text-dim)] transition-colors hover:text-[var(--text)] [&.router-link-exact-active]:font-semibold [&.router-link-exact-active]:text-[var(--text)]"
+      <div
+        ref="linksEl"
+        class="flex min-w-0 flex-1 gap-x-5 overflow-x-auto [scrollbar-width:none] max-[600px]:gap-x-4 [mask-image:linear-gradient(to_right,#000_calc(100%_-_2rem),transparent)] [&::-webkit-scrollbar]:hidden"
       >
-        {{ link.label }}
-      </RouterLink>
-      <button class="ml-auto border-none bg-transparent p-0 text-sm text-[var(--text-dim)] hover:bg-transparent hover:text-[var(--text)]" @click="handleLogout">
-        Logout
+        <RouterLink
+          v-for="link in navLinks"
+          :key="link.to"
+          :to="link.to"
+          class="shrink-0 py-1 text-sm whitespace-nowrap text-[var(--text-dim)] transition-colors hover:text-[var(--text)] [&.router-link-exact-active]:font-semibold [&.router-link-exact-active]:text-[var(--text)]"
+        >
+          {{ link.label }}
+        </RouterLink>
+        <!-- Keeps the last link clear of the fade when scrolled to the end. -->
+        <span class="w-4 shrink-0"></span>
+      </div>
+      <button
+        class="shrink-0 border-none bg-transparent p-0 text-sm text-[var(--text-dim)] hover:bg-transparent hover:text-[var(--text)]"
+        title="Logout"
+        @click="handleLogout"
+      >
+        <span class="max-[600px]:hidden">Logout</span>
+        <svg class="h-5 w-5 min-[601px]:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+        </svg>
       </button>
     </nav>
 
     <!-- Folders gets more room: it's a file manager with a sidebar tree. -->
     <main
       class="mx-auto px-4 py-5"
-      :class="[route.name === 'folders' ? 'max-w-7xl' : 'max-w-5xl', { 'pb-24 max-[600px]:pb-32': isLoggedIn() && currentTrack && playerState.view === 'bar' }]"
+      :class="[route.name === 'folders' ? 'max-w-7xl' : 'max-w-5xl', { 'pb-24 max-[760px]:pb-32': isLoggedIn() && currentTrack && playerState.view === 'bar' }]"
     >
       <RouterView />
     </main>
