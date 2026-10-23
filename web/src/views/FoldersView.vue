@@ -21,6 +21,7 @@ import {
 import { addToQueue, currentTrack, playNext, playQueue } from "../stores/player";
 import { canDropInto, drag, folderTree, loadFolderTree, type DragPayload } from "../stores/folders";
 import { uploads } from "../stores/uploads";
+import { findSongOnline, songEdits } from "../stores/songEdits";
 import { AUDIO_EXTENSIONS, fromDataTransfer, fromFileList, isFileDrag, type PickedFile } from "../utils/pickFiles";
 import { baseName, formatBytes, formatDate, formatDuration, joinPath, parentOf } from "../utils/format";
 import ShuffleButton from "../components/ShuffleButton.vue";
@@ -32,6 +33,7 @@ import MoveDialog from "../components/drive/MoveDialog.vue";
 import ContextMenu, { type MenuItem } from "../components/drive/ContextMenu.vue";
 import PropertiesDialog from "../components/drive/PropertiesDialog.vue";
 import TagEditorDialog from "../components/TagEditorDialog.vue";
+import BatchIdentifyDialog from "../components/BatchIdentifyDialog.vue";
 
 const router = useRouter();
 
@@ -575,6 +577,11 @@ async function onViewDrop(e: DragEvent) {
 
 // Uploads finish in the background (stores/uploads.ts): refresh once a
 // burst of them settles, whichever folder they went to (totals change too).
+// A song edited from its ⋯ menu ("Find online…") may show different tags.
+watch(
+  () => songEdits.saved,
+  () => void refresh(),
+);
 let uploadRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 watch(
   () => uploads.completed,
@@ -600,6 +607,17 @@ async function editTags(list: Entry[]) {
     const count = list.reduce((n, e) => n + (e.kind === "song" ? 1 : e.dir.songCount), 0);
     if (!count) return notify("Nothing to edit — no songs selected");
     tagDialog.value = { songs: await resolveSongs(list), songIds, folderPaths, count };
+  });
+}
+
+// One song: the single-song "Find online…"; more (or folders): the batch one.
+const identifyDialog = ref<Song[] | null>(null);
+async function findOnline(list: Entry[]) {
+  await attempt(async () => {
+    const songs = await resolveSongs(list);
+    if (!songs.length) return notify("Nothing to look up — no songs selected");
+    if (songs.length === 1) findSongOnline(songs[0]);
+    else identifyDialog.value = songs;
   });
 }
 
@@ -634,6 +652,7 @@ function selectionActions(list: Entry[]): MenuItem[] {
       action: () => attempt(async () => void (playlistDialog.value = (await resolveSongs(list)).map((s) => s.id))),
     },
     { label: "Edit tags…", separated: true, action: () => editTags(list) },
+    { label: "Find online…", action: () => findOnline(list) },
     {
       label: "Move to…",
       action: () => (moveDialog.value = { payload: payloadOf(list), count: list.length }),
@@ -1098,6 +1117,7 @@ const columns: { key: SortKey; label: string; class: string }[] = [
       @close="propertiesDialog = null"
     />
 
+    <BatchIdentifyDialog v-if="identifyDialog" :songs="identifyDialog" @close="identifyDialog = null" @done="refresh()" />
     <TagEditorDialog
       v-if="tagDialog"
       v-bind="tagDialog"

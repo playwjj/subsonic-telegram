@@ -5,6 +5,8 @@ import { playerState, currentTrack } from "./stores/player";
 import AppLogo from "./components/AppLogo.vue";
 import PlayerBar from "./components/PlayerBar.vue";
 import UploadPanel from "./components/upload/UploadPanel.vue";
+import TagEditorDialog from "./components/TagEditorDialog.vue";
+import { songEdits, songSaved } from "./stores/songEdits";
 
 // A file dropped anywhere that isn't a drop zone would make the browser
 // open it, navigating away from the app (and any running uploads).
@@ -73,6 +75,16 @@ async function handleLogout() {
     </main>
 
     <UploadPanel v-if="isLoggedIn() && route.name !== 'login'" />
+    <TagEditorDialog
+      v-if="songEdits.identifying"
+      :key="songEdits.identifying.id"
+      :songs="[songEdits.identifying]"
+      :song-ids="[songEdits.identifying.id]"
+      :count="1"
+      start-searching
+      @close="songEdits.identifying = null"
+      @saved="songSaved(songEdits.identifying!)"
+    />
     <PlayerBar v-if="isLoggedIn() && route.name !== 'login'" />
   </div>
 </template>

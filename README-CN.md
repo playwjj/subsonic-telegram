@@ -254,7 +254,7 @@ npm run fix-covers -- --artist-photos [--limit=N] [--dry-run] [--retry-failed]
 
 **播放器**：支持随机播放（播放条上的 🔀 是对当前队列的开关；各处的「🔀 Shuffle」按钮则直接打乱一组歌开始播——专辑、歌单（详情页和歌单列表的每一行）、艺人、文件夹（含子文件夹）、收藏、Songs 页（「Shuffle all」，整个曲库），以及首页 Random Songs 旁边的「Shuffle library」。艺人/文件夹/整个曲库这几个通过本项目自己的 `getShuffleSongs` 接口均匀随机抽最多 500 首；关掉随机会恢复原顺序）、循环（关/列表/单曲）和音量调节（随机/循环/音量设置存在 `localStorage`）。播放队列会通过 `savePlayQueue` 同步到服务端，打开页面时用 `getPlayQueue` 恢复到上次的歌和进度（暂停状态），刷新页面或者从别的 Subsonic 客户端过来都能续播；因为所有 id 都要拼进 URL 查询参数，只保存当前曲目前后共 200 首的窗口。手机上（≤600px）播放条会分成两行——封面/歌名/播放控制一行，进度条和歌词/队列按钮一行——并隐藏星级评分和音量条。锁屏/通知栏控制和键盘媒体键走的是 Media Session API。播放条上的 ☰ 打开播放队列（点任意一首跳过去播、移除单首或清空队列）；每一行歌曲的 ⋯ 菜单里有「Play next」（下一首播放）和「Add to queue」（加到队列末尾）。
 
-**Folders 是什么**：按 `source_path`（`npm run import` 记录的、相对导入根目录的路径）还原出原始文件夹树，跟 Artists 那种按 ID3 标签分组的浏览方式并列存在。对那些"合集"文件夹（比如按月份存的热歌榜）特别有用——这类文件夹里每首歌的 ID3 艺人标签都不一样，按 Artists 浏览会被打散到几十上百个艺人名下，按 Folders 浏览则完全保留原来"一个文件夹一份合集"的样子。对应的后端接口是 `getFolder`、`getFolderTree`、`getFolderSongs`、`moveItems`、`renameTrackFile`、`deleteItems`、`getTrackStorage`、`getTrash`、`restoreTrash`、`purgeTrash`、`updateTracks`、`setCoverArt`、`getDuplicates` 等（逻辑在 `src/subsonic/folders.ts`、`src/subsonic/trash.ts` 和 `src/subsonic/metadata.ts`），跟 `getLibraryStats`/`getSongs`/`getRecentlyPlayed`/`getMostPlayed` 一样，都不是 Subsonic 官方协议的一部分，只服务于这个项目自己的 Web UI。
+**Folders 是什么**：按 `source_path`（`npm run import` 记录的、相对导入根目录的路径）还原出原始文件夹树，跟 Artists 那种按 ID3 标签分组的浏览方式并列存在。对那些"合集"文件夹（比如按月份存的热歌榜）特别有用——这类文件夹里每首歌的 ID3 艺人标签都不一样，按 Artists 浏览会被打散到几十上百个艺人名下，按 Folders 浏览则完全保留原来"一个文件夹一份合集"的样子。对应的后端接口是 `getFolder`、`getFolderTree`、`getFolderSongs`、`moveItems`、`renameTrackFile`、`deleteItems`、`getTrackStorage`、`getTrash`、`restoreTrash`、`purgeTrash`、`updateTracks`、`setCoverArt`、`getDuplicates`、`searchOnline`、`getOnlineAlbumTracks`、`parseFileName` 等（逻辑在 `src/subsonic/folders.ts`、`src/subsonic/trash.ts`、`src/subsonic/metadata.ts`、`src/subsonic/online.ts` 和 `src/subsonic/fileNames.ts`），跟 `getLibraryStats`/`getSongs`/`getRecentlyPlayed`/`getMostPlayed` 一样，都不是 Subsonic 官方协议的一部分，只服务于这个项目自己的 Web UI。
 
 ### 从 Web UI 管理歌库
 
@@ -264,7 +264,8 @@ npm run fix-covers -- --artist-photos [--limit=N] [--dry-run] [--retry-failed]
 - Telegram 每个频道大约每分钟只接受 20 次上传。遇到 429 时，`uploadTrack` 会把 Telegram 给出的 `retryAfter` 传回前端，队列会暂停这么久（面板上有倒计时）再继续——所以大批量上传只是需要多花点时间。
 - 文件会先传到 Telegram，成功后才写 D1，所以上传失败不会留下没有歌曲的空艺人或空专辑。跟另一个文件夹里某首歌同名、同专辑的文件，会得到自己独立的 id，不会被误认成那首歌。
 - 跟 `npm run import` 一样是 19MB 上限（Telegram `getFile` 的下载限制）——超过这个大小的文件即使传上去了也永远放不回来，所以前端和后端都会拒绝。
-- 上传歌曲时不带封面——这样建出来的新专辑在手动加封面之前没有封面（见下面的「编辑标签和封面」）。
+- **封面**：文件内嵌的正面封面会成为所在专辑的封面，前提是这张专辑还没有封面（每张专辑只传一次，最长边缩到 1200px 以内）。这只针对真正的专辑——来自标签，或者这一批统一填的专辑名。只是按文件夹名归成"专辑"的歌（一个文件夹里散装的歌）会把这张图设成它自己的封面，免得整个文件夹都用上某一首歌的封面。
+- **在线补全缺失信息**（确认框里的勾选项，默认打开，会记住上次的选择）：只补文件里没有的信息，不覆盖任何已有标签，而且只采用 [iTunes](https://performance-partners.apple.com/search-api)/[MusicBrainz](https://musicbrainz.org) 上高度吻合的结果——忽略大小写、标点和简繁体之后艺人和歌名完全一致，时长和文件相差不超过 5 秒。没有艺人标签的文件，会从 `艺人 - 歌名.mp3` 这样的文件名里拆出艺人和歌名（两种顺序都试）；拆不出来的话，交给 Workers AI 读文件名和所在文件夹（`01.周杰伦-晴天[320k].mp3`，或者 `周杰伦/叶惠美/` 下的 `03 晴天.flac`），结果同样要在线匹配确认才用。本来会归到 "Unknown Album" 的歌，会用匹配到的专辑名、年份和流派。没有封面（既没有内嵌、专辑也还没有）的专辑会用在线匹配到的封面，并补上缺的年份或流派；散装的歌则设成它自己的封面。上传面板会写明补了什么（"cover found online"、"artist from file name"……）。数据源限流或连不上，就只是什么都不补——上传本身不会因此失败。
 - **删除歌曲**（Songs/Album 列表行上的 🗑 按钮——playlist 和搜索结果视图没有这个按钮，它们各自已经有语义不同的"从歌单移除"/什么都没有）会把这首歌移进回收站（见下文）。
 
 **Folders 页面是一个网盘式的文件管理器**：
@@ -285,6 +286,12 @@ npm run fix-covers -- --artist-photos [--limit=N] [--dry-run] [--retry-failed]
 回收站、重试队列和它们的索引都是 `CREATE TABLE IF NOT EXISTS`，所以对已有数据库跑一次 `npm run db:migrate:remote` 就能加上。
 
 **编辑标签和封面**：入口有 Folders 菜单里的「Edit tags…」（歌曲和文件夹可以混选，选文件夹等于选它下面的所有歌）、Songs/Album 列表行上的 ✎ 按钮，以及专辑页的「✎ Edit」（专辑名、专辑艺人、年份、流派、封面）。这些只改 D1 里的歌库信息，Telegram 里的音频文件不会被改写。歌曲 id 不变，所以收藏、评分、播放次数和歌单都不受影响。改艺人或专辑时，歌曲会移到同名的专辑里——跟带这些标签上传时会进的是同一个专辑，所以改成一个已有专辑的名字就等于合并进去；因此变空的专辑和艺人会被删掉，它们的收藏会跟着歌曲转过去。年份和流派是存在专辑上的，所以会作用于整张专辑。新封面（或者在艺人页换的艺人照片）会先在浏览器里缩到最长边 1200px 以内，再存进 Telegram；旧图片如果没有别的地方在用（包括回收站里的记录），会从 Telegram 删掉。
+
+**在线查找（Find online…）**：专辑编辑框和单曲的标签编辑框里有「🔍 Find online…」按钮，用当前的艺人和专辑名/歌名（可以改）去搜 iTunes 和 MusicBrainz（都免费、不用 key，`src/subsonic/online.ts`）。结果列表带封面、年份、流派、曲目数或曲目号、时长和吻合程度；单曲时长和文件相差超过 5 秒会标出来（通常是 Live 或 Remix 版）。选中一个会把信息填进表单，每个改动过的字段旁边显示原来的值，照常检查后保存，或者点「Reset」撤销——保存之前什么都不会写入。专辑的话，会按歌名把匹配结果的曲目表对到专辑里的歌上，可以在同一次保存里把曲目号/碟号一起改了。单曲的话，匹配结果的封面会作为这首歌自己的封面，而不是专辑封面。用简体搜索就返回简体，哪怕 iTunes 的台湾/香港区和 MusicBrainz 给的是繁体。文件名乱七八糟的单曲，可以点「✨ Read artist/title from the file name」让 Workers AI 把搜索框填好。选中的封面由 Worker 下载（`setCoverArt` 带 `url=`，只允许这两个数据源的图片域名），跟其它封面一样存进 Telegram。每首歌的 ⋯ 菜单（任何列表里都有，包括搜索结果和歌单）里也有「Find online…」，会直接打开这首歌的编辑框并进入搜索。
+
+在 Folders 里多选几首歌（或文件夹）再选「Find online…」，会逐首在线查找——大约每 1.5 秒一次，iTunes 限流时会暂停等待——然后列出每首歌的最佳匹配：高度吻合的（跟上传时「在线补全缺失信息」同一个标准）默认勾上，其余的可以手动勾选或换成别的候选。"Unknown Artist" 的歌会先让 Workers AI 从文件名里读出艺人和歌名再搜。默认歌曲留在原来的专辑里，只给还没有自己封面的歌加上封面；「Use the match's title & artist spelling」（用匹配结果的歌名和艺人写法）和「Move to the matched album」（移到匹配到的专辑，带上发行版的年份、流派和曲目号，那张专辑没有封面的话也设上）需要手动打开，因为移动会把歌从文件夹专辑里拿出去。点「Apply」之前什么都不会改；应用时逐首处理勾选的歌，封面遇到 Telegram 限流会等待后继续。
+
+**Workers AI**（`wrangler.toml` 里的 `[ai]`，由 `src/subsonic/fileNames.ts` 里的 `parseFileName` 使用）只负责把文件名拆成艺人和歌名，从不让它提供事实。它返回的内容如果不在文件名或文件夹名里——比如翻译过的、或者它"知道"的艺人名——会被直接丢掉。除了账号开通了 Workers AI 之外不需要别的设置，用量只占每天免费额度的零头。删掉 `[ai]` 那一段就关掉了，只是少了 AI 这一步。
 
 **存储空间**（Folders 侧栏的 ▤ Storage）：总大小和总时长、回收站、R2 缓存（已用/上限）、封面数量、各顶层文件夹和各格式的占用、每月新增，以及最大的几个文件（超过 Telegram 20MB 下载上限、没法播放的会标出来）。这个页面上还有两个维护工具：
 

@@ -3,6 +3,7 @@ import { ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { getAlbum, deleteTrack, coverArtUrl, type AlbumDetail, type Song } from "../api/subsonic";
 import { playQueue, shufflePlay } from "../stores/player";
+import { songEdits } from "../stores/songEdits";
 import TrackRow from "../components/TrackRow.vue";
 import AlbumEditDialog from "../components/AlbumEditDialog.vue";
 import TagEditorDialog from "../components/TagEditorDialog.vue";
@@ -24,6 +25,11 @@ async function load(id: string) {
   }
 }
 watch(() => props.id, load, { immediate: true });
+// A song edited from its ⋯ menu ("Find online…") may have left this album.
+watch(
+  () => songEdits.saved,
+  () => load(props.id),
+);
 
 // A new name/artist gives the album a new id (and may merge it into
 // another album) — follow it there.

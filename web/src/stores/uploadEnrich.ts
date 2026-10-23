@@ -26,8 +26,9 @@ export interface OnlineFill {
   match?: OnlineMatch; // the song match it all came from
 }
 
-async function confidentSong(artist: string, title: string, duration?: number): Promise<OnlineMatch | null> {
-  const { matches } = await searchOnline("song", artist, title);
+// The first match close enough to use without asking (also used by the
+// batch "Find online…", BatchIdentifyDialog).
+export function confidentMatch(matches: OnlineMatch[], duration?: number): OnlineMatch | null {
   return (
     matches.find(
       (m) =>
@@ -36,6 +37,10 @@ async function confidentSong(artist: string, title: string, duration?: number): 
         (duration === undefined || (m.duration !== undefined && Math.abs(m.duration - duration) <= DURATION_TOLERANCE)),
     ) ?? null
   );
+}
+
+async function confidentSong(artist: string, title: string, duration?: number): Promise<OnlineMatch | null> {
+  return confidentMatch((await searchOnline("song", artist, title)).matches, duration);
 }
 
 // "Artist - Title" or "Title - Artist" from a file name, minus a leading

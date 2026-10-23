@@ -9,9 +9,12 @@ const API_VERSION = "1.16.1";
 
 export class SubsonicError extends Error {
   code: number;
-  constructor(code: number, message: string) {
+  // Seconds to wait, when Telegram's rate limit is why it failed.
+  retryAfter?: number;
+  constructor(code: number, message: string, retryAfter?: number) {
     super(message);
     this.code = code;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -46,7 +49,7 @@ async function parseResponse<T>(res: Response): Promise<T> {
   const data = (await res.json()) as { "subsonic-response": any };
   const body = data["subsonic-response"];
   if (body.status !== "ok") {
-    throw new SubsonicError(body.error?.code ?? 0, body.error?.message ?? "Unknown error");
+    throw new SubsonicError(body.error?.code ?? 0, body.error?.message ?? "Unknown error", body.error?.retryAfter);
   }
   return body as T;
 }
@@ -188,6 +191,11 @@ export async function getArtist(id: string): Promise<ArtistDetail> {
 export async function getAlbum(id: string): Promise<AlbumDetail> {
   const body = await call<{ album: AlbumDetail }>("getAlbum", { id });
   return body.album;
+}
+
+export async function getSong(id: string): Promise<Song> {
+  const body = await call<{ song: Song }>("getSong", { id });
+  return body.song;
 }
 
 export async function getAlbumList2(opts: { type: string; size: number }): Promise<Album[]> {

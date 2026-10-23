@@ -9,7 +9,8 @@ import OnlineSearch from "./OnlineSearch.vue";
 // showing current values; `count` the total. Only changed fields are sent.
 // For a single song, "Find online…" fills the form (and offers the match's
 // cover as the song's own cover) from an iTunes/MusicBrainz match.
-const props = defineProps<{ songs: Song[]; songIds: string[]; folderPaths?: string[]; count: number }>();
+// startSearching: open straight on "Find online…" (from a song's ⋯ menu).
+const props = defineProps<{ songs: Song[]; songIds: string[]; folderPaths?: string[]; count: number; startSearching?: boolean }>();
 const emit = defineEmits<{ close: []; saved: [result: { updated: number; albumIds: string[] }] }>();
 
 type Key = "title" | "artist" | "album" | "year" | "genre" | "track" | "disc";
@@ -48,7 +49,7 @@ const changed = computed(() => fields.value.filter((f) => isChanged(f.key)));
 
 // Only for one song picked by id (not "everything in a folder").
 const canSearch = computed(() => single.value && props.songIds.length === 1 && !props.folderPaths?.length);
-const searching = ref(false);
+const searching = ref(!!props.startSearching && canSearch.value);
 const matchedFrom = ref<OnlineMatch | null>(null);
 const useCover = ref(true);
 const coverUrl = computed(() => (useCover.value ? matchedFrom.value?.coverUrl : undefined));

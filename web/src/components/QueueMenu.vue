@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import type { Song } from "../api/subsonic";
 import { addToQueue, playNext } from "../stores/player";
+import { findSongOnline } from "../stores/songEdits";
 
 const props = defineProps<{ song: Song }>();
 
@@ -19,6 +20,7 @@ function choose(action: (song: Song) => void) {
     <div v-if="open" class="dropdown">
       <button class="option" @click="choose(playNext)">Play next</button>
       <button class="option" @click="choose(addToQueue)">Add to queue</button>
+      <button class="option" @click="choose(findSongOnline)">Find online…</button>
     </div>
   </div>
 </template>
