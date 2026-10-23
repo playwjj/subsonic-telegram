@@ -38,7 +38,7 @@ watch(
   () => route.path,
   async () => {
     await nextTick();
-    linksEl.value?.querySelector(".router-link-exact-active")?.scrollIntoView({ block: "nearest", inline: "center" });
+    linksEl.value?.querySelector(".router-link-active")?.scrollIntoView({ block: "nearest", inline: "center" });
   },
 );
 
@@ -87,13 +87,13 @@ async function handleLogout() {
       </RouterLink>
       <div
         ref="linksEl"
-        class="flex min-w-0 flex-1 gap-x-5 overflow-x-auto [scrollbar-width:none] max-[600px]:gap-x-4 [mask-image:linear-gradient(to_right,#000_calc(100%_-_2rem),transparent)] [&::-webkit-scrollbar]:hidden"
+        class="flex min-w-0 flex-1 gap-x-1 overflow-x-auto [scrollbar-width:none] max-[600px]:gap-x-0.5 [mask-image:linear-gradient(to_right,#000_calc(100%_-_2rem),transparent)] [&::-webkit-scrollbar]:hidden"
       >
         <RouterLink
           v-for="link in navLinks"
           :key="link.to"
           :to="link.to"
-          class="shrink-0 py-1 text-sm whitespace-nowrap text-[var(--text-dim)] transition-colors hover:text-[var(--text)] [&.router-link-exact-active]:font-semibold [&.router-link-exact-active]:text-[var(--text)]"
+          class="shrink-0 rounded-full px-3 py-1 text-sm whitespace-nowrap text-[var(--text-dim)] transition-colors hover:bg-white/5 hover:text-[var(--text)] max-[600px]:px-2.5 [&.router-link-active]:bg-white/[0.12] [&.router-link-active]:font-medium [&.router-link-active]:text-[var(--text)] [&.router-link-active]:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]"
         >
           {{ link.label }}
         </RouterLink>
