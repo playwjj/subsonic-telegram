@@ -2,7 +2,7 @@
 // secrets (always win when both are set), or what the web UI's setup page
 // saved in D1's settings table (src/subsonic/telegramSetup.ts).
 import type { Env } from "./types";
-import type { DeleteFilesResult, FileCheck, SourceStorage } from "./storage/types";
+import type { DeleteFilesResult, FileCheck, OpenedFile, SourceStorage } from "./storage/types";
 
 export interface TelegramConfig {
   botToken: string;
@@ -77,7 +77,7 @@ export class UnconfiguredStorage implements SourceStorage {
   async getFileResponse(): Promise<Response> {
     this.fail();
   }
-  async getFileBytes(): Promise<{ bytes: Uint8Array; contentType: string }> {
+  async openFile(): Promise<OpenedFile> {
     this.fail();
   }
   async deleteFile(): Promise<void> {

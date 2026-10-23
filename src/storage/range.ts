@@ -42,3 +42,43 @@ export function rangeHeaders(contentType: string, total: number, range: ByteRang
   }
   return headers;
 }
+
+// The requested part of a file whose bytes arrive as a stream from offset 0
+// (Telegram's file CDN, see telegram.ts): bytes before the range are
+// dropped as they pass, and reading stops once the range is complete — so
+// playback starts on the first chunk instead of after the whole download.
+export function rangeResponse(
+  body: ReadableStream<Uint8Array>,
+  total: number,
+  contentType: string,
+  rangeHeader: string | null,
+): Response {
+  const range = parseRange(total, rangeHeader);
+  if (range === "unsatisfiable") {
+    void body.cancel();
+    return rangeNotSatisfiable(total);
+  }
+  const length = range ? range.end - range.start + 1 : total;
+  const part = range ? sliceStream(body, range.start, range.end) : body;
+  // FixedLengthStream so the response carries Content-Length, not chunked
+  // encoding — players need it to know how far they can seek.
+  return new Response(part.pipeThrough(new FixedLengthStream(length)), {
+    status: range ? 206 : 200,
+    headers: rangeHeaders(contentType, total, range),
+  });
+}
+
+function sliceStream(body: ReadableStream<Uint8Array>, start: number, end: number): ReadableStream<Uint8Array> {
+  let offset = 0;
+  return body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        const from = Math.max(start - offset, 0);
+        const to = Math.min(end + 1 - offset, chunk.byteLength);
+        offset += chunk.byteLength;
+        if (from < to) controller.enqueue(chunk.subarray(from, to));
+        if (offset > end) controller.terminate();
+      },
+    }),
+  );
+}

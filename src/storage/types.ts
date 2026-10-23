@@ -19,11 +19,17 @@ export interface StorageBackend {
 
 export type FileCheck = { ok: true; size?: number } | { ok: false; error: string };
 
-// A backend that can also hand back a whole file's raw bytes in one shot.
+// A backend that can also hand back a whole file as a stream from byte 0.
 // CachedStorage (cached.ts) needs this from whatever backend it wraps, to
 // populate its cache on a miss — TelegramStorage implements it.
 export interface SourceStorage extends StorageBackend {
-  getFileBytes(ref: string, contentType?: string): Promise<{ bytes: Uint8Array; contentType: string }>;
+  openFile(ref: string, contentType?: string): Promise<OpenedFile>;
+}
+
+export interface OpenedFile {
+  body: ReadableStream<Uint8Array>;
+  size: number;
+  contentType: string;
 }
 
 export interface DeleteFilesResult {

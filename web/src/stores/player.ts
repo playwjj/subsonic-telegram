@@ -18,6 +18,28 @@ let scrobblePending = false;
 // like every other media player.
 const PREV_RESTART_THRESHOLD_SEC = 3;
 
+// Once a song has played this long (so it wasn't skipped), the next one is
+// requested in the background: a cache miss makes the Worker copy the whole
+// file from Telegram into R2 (src/storage/cached.ts), so it starts without
+// that wait when its turn comes.
+const WARM_NEXT_AFTER_SEC = 15;
+let warmedId: string | undefined;
+
+function warmNext(): void {
+  const upcoming =
+    state.currentIndex < state.queue.length - 1
+      ? state.queue[state.currentIndex + 1]
+      : state.repeat === "all" && !state.shuffle
+        ? state.queue[0]
+        : undefined;
+  if (!upcoming || upcoming.id === warmedId || upcoming === state.queue[state.currentIndex]) return;
+  warmedId = upcoming.id;
+  // One byte is enough to start the copy; the body isn't needed here.
+  void fetch(streamUrl(upcoming.id), { headers: { Range: "bytes=0-0" } })
+    .then((res) => res.body?.cancel())
+    .catch(() => {});
+}
+
 export type RepeatMode = "off" | "all" | "one";
 
 // How the player is shown: the bottom bar, a small floating disc
@@ -71,6 +93,7 @@ audio.volume = state.volume;
 
 audio.addEventListener("timeupdate", () => {
   state.currentTime = audio.currentTime;
+  if (audio.currentTime >= WARM_NEXT_AFTER_SEC) warmNext();
 });
 audio.addEventListener("loadedmetadata", () => {
   state.duration = audio.duration;

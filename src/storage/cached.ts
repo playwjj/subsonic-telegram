@@ -1,5 +1,5 @@
-import type { DeleteFilesResult, FileCheck, SourceStorage, StorageBackend } from "./types";
-import { parseRange, rangeHeaders, rangeNotSatisfiable } from "./range";
+import type { DeleteFilesResult, FileCheck, OpenedFile, SourceStorage, StorageBackend } from "./types";
+import { parseRange, rangeHeaders, rangeNotSatisfiable, rangeResponse } from "./range";
 import * as cache from "../db/cache";
 
 // Optional read-through cache in front of a SourceStorage (Telegram). Only
@@ -11,6 +11,9 @@ import * as cache from "../db/cache";
 // nothing is cached until it's actually streamed once. That keeps this
 // class simple and means a stale cache entry can never diverge from the
 // source of truth on write -- only reads populate/evict it.
+// Keys being copied into R2 right now, by this isolate.
+const populating = new Set<string>();
+
 export class CachedStorage implements StorageBackend {
   constructor(
     private source: SourceStorage,
@@ -69,20 +72,20 @@ export class CachedStorage implements StorageBackend {
       await cache.deleteCacheEntry(this.db, key);
     }
 
-    let bytes: Uint8Array;
-    let resolvedType: string;
+    let file: OpenedFile;
     try {
-      ({ bytes, contentType: resolvedType } = await this.source.getFileBytes(ref, contentType));
+      file = await this.source.openFile(ref, contentType);
     } catch (err) {
       return new Response(err instanceof Error ? err.message : String(err), { status: 502 });
     }
-    this.ctx.waitUntil(this.populate(key, bytes, resolvedType));
-
-    const range = parseRange(bytes.byteLength, rangeHeader);
-    if (range === "unsatisfiable") return rangeNotSatisfiable(bytes.byteLength);
-    const body = range ? bytes.slice(range.start, range.end + 1) : bytes;
-    const headers = rangeHeaders(resolvedType, bytes.byteLength, range);
-    return new Response(body, { status: range ? 206 : 200, headers });
+    // A browser starting a song often asks for the start and the end at
+    // once; only the first of those copies it into R2. Per isolate, and just
+    // a key set — awaiting another request's copy could hang this one.
+    if (populating.has(key)) return rangeResponse(file.body, file.size, file.contentType, rangeHeader);
+    populating.add(key);
+    const [toClient, toCache] = file.body.tee();
+    this.ctx.waitUntil(this.populate(key, toCache, file.size, file.contentType).finally(() => populating.delete(key)));
+    return rangeResponse(toClient, file.size, file.contentType, rangeHeader);
   }
 
   private async serveFromCache(
@@ -103,10 +106,12 @@ export class CachedStorage implements StorageBackend {
     return new Response(object.body, { status: range ? 206 : 200, headers });
   }
 
-  private async populate(key: string, bytes: Uint8Array, contentType: string): Promise<void> {
+  // Reads the whole file even when the player only wanted a range of it (or
+  // went away), so the next request for any part is a hit.
+  private async populate(key: string, body: ReadableStream<Uint8Array>, size: number, contentType: string): Promise<void> {
     try {
-      await this.bucket.put(key, bytes, { httpMetadata: { contentType } });
-      await cache.upsertCacheEntry(this.db, key, bytes.byteLength, contentType, nowSeconds());
+      await this.bucket.put(key, body.pipeThrough(new FixedLengthStream(size)), { httpMetadata: { contentType } });
+      await cache.upsertCacheEntry(this.db, key, size, contentType, nowSeconds());
       await this.evictIfNeeded();
     } catch (err) {
       console.warn(`Cache populate failed: ${err}`);

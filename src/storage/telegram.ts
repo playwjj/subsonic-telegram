@@ -1,5 +1,5 @@
-import type { DeleteFilesResult, FileCheck, StorageBackend } from "./types";
-import { parseRange, rangeHeaders, rangeNotSatisfiable } from "./range";
+import type { DeleteFilesResult, FileCheck, OpenedFile, SourceStorage } from "./types";
+import { rangeResponse } from "./range";
 
 interface TelegramRef {
   messageId: number;
@@ -28,7 +28,12 @@ function truncateCaption(text: string): string {
 // Bot API's deleteMessages takes at most this many message ids per call.
 const MAX_DELETE_BATCH = 100;
 
-export class TelegramStorage implements StorageBackend {
+// See TelegramStorage.fileInfo. Telegram says at least an hour; a bit less
+// leaves room for the stream itself.
+const FILE_PATH_TTL_MS = 50 * 60 * 1000;
+const filePaths = new Map<string, { path: string; size?: number; at: number }>();
+
+export class TelegramStorage implements SourceStorage {
   constructor(
     private botToken: string,
     private channelId: string,
@@ -62,28 +67,48 @@ export class TelegramStorage implements StorageBackend {
     return JSON.stringify(ref);
   }
 
-  // Fetches the whole file's bytes from Telegram, bypassing Range entirely.
-  // Used both by getFileResponse below and by CachedStorage (cached.ts),
-  // which needs the full bytes once to populate its R2 cache and then slices
-  // ranges out of that cached copy itself instead of calling this again.
-  async getFileBytes(refStr: string, contentType?: string): Promise<{ bytes: Uint8Array; contentType: string }> {
-    const ref = JSON.parse(refStr) as TelegramRef;
+  // getFile's answer, kept per isolate: Telegram guarantees the download
+  // path stays valid for at least an hour, and asking again on every
+  // stream of a song costs a round trip before the first byte.
+  private async fileInfo(ref: TelegramRef, fresh = false): Promise<{ path: string; size?: number; remembered: boolean }> {
+    const known = filePaths.get(ref.fileId);
+    if (!fresh && known && Date.now() - known.at < FILE_PATH_TTL_MS) return { ...known, remembered: true };
 
     const getFileRes = await fetch(this.api(`getFile?file_id=${encodeURIComponent(ref.fileId)}`));
     const getFileData = (await getFileRes.json()) as any;
     if (!getFileData.ok) {
       throw new Error(`Telegram getFile failed: ${JSON.stringify(getFileData)}`);
     }
-    const filePath = getFileData.result.file_path as string;
-    const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${filePath}`;
+    const info = { path: getFileData.result.file_path as string, size: getFileData.result.file_size as number | undefined };
+    filePaths.set(ref.fileId, { ...info, at: Date.now() });
+    return { ...info, remembered: false };
+  }
 
-    const upstream = await fetch(fileUrl);
-    if (!upstream.ok) {
+  // The whole file, as a stream from byte 0 — Telegram's CDN is never asked
+  // for a range (see getFileResponse). Used both by getFileResponse below and
+  // by CachedStorage (cached.ts), which also copies it into R2 as it passes.
+  async openFile(refStr: string, contentType?: string): Promise<OpenedFile> {
+    const ref = JSON.parse(refStr) as TelegramRef;
+    let info = await this.fileInfo(ref);
+    let upstream = await fetch(`https://api.telegram.org/file/bot${this.botToken}/${info.path}`);
+    if (!upstream.ok && info.remembered) {
+      // A remembered path that expired early: ask getFile again, once.
+      await upstream.body?.cancel();
+      info = await this.fileInfo(ref, true);
+      upstream = await fetch(`https://api.telegram.org/file/bot${this.botToken}/${info.path}`);
+    }
+    if (!upstream.ok || !upstream.body) {
+      await upstream.body?.cancel();
       throw new Error(`Telegram file fetch failed: ${upstream.status}`);
     }
-    const bytes = new Uint8Array(await upstream.arrayBuffer());
     const resolvedType = contentType ?? upstream.headers.get("content-type") ?? "application/octet-stream";
-    return { bytes, contentType: resolvedType };
+    const length = Number(upstream.headers.get("content-length") ?? info.size);
+    if (Number.isFinite(length) && length > 0 && !upstream.headers.has("content-encoding")) {
+      return { body: upstream.body, size: length, contentType: resolvedType };
+    }
+    // Size unknown up front: read it all to find out.
+    const bytes = new Uint8Array(await upstream.arrayBuffer());
+    return { body: new Response(bytes).body!, size: bytes.byteLength, contentType: resolvedType };
   }
 
   async getFileResponse(refStr: string, rangeHeader: string | null, contentType?: string): Promise<Response> {
@@ -92,21 +117,15 @@ export class TelegramStorage implements StorageBackend {
     // just forwarded that through, a player asking for bytes at some offset
     // would instead get the file from byte 0 while believing it got the
     // range it asked for, producing misaligned/unparsable audio. So we always
-    // fetch the full file ourselves and slice out the requested range,
-    // never depending on Telegram to do it correctly.
-    let bytes: Uint8Array;
-    let resolvedType: string;
+    // fetch the full file ourselves and cut out the requested range as it
+    // streams past, never depending on Telegram to do it correctly.
+    let file: OpenedFile;
     try {
-      ({ bytes, contentType: resolvedType } = await this.getFileBytes(refStr, contentType));
+      file = await this.openFile(refStr, contentType);
     } catch (err) {
       return new Response(err instanceof Error ? err.message : String(err), { status: 502 });
     }
-
-    const range = parseRange(bytes.byteLength, rangeHeader);
-    if (range === "unsatisfiable") return rangeNotSatisfiable(bytes.byteLength);
-    const body = range ? bytes.slice(range.start, range.end + 1) : bytes;
-    const headers = rangeHeaders(resolvedType, bytes.byteLength, range);
-    return new Response(body, { status: range ? 206 : 200, headers });
+    return rangeResponse(file.body, file.size, file.contentType, rangeHeader);
   }
 
   // Requires the bot to hold the channel's "Delete messages" admin right.
