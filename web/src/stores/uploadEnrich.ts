@@ -5,7 +5,7 @@
 // leaves little doubt: like src/lyrics.ts, nothing beats a confident wrong
 // answer. Everything here is best effort; the song itself is uploaded
 // either way.
-import { searchOnline, setCoverArt, updateTracks, type OnlineMatch, type Song } from "../api/subsonic";
+import { parseFileName, searchOnline, setCoverArt, updateTracks, type OnlineMatch, type Song } from "../api/subsonic";
 import { prepareCover } from "../utils/image";
 
 // Scores from src/subsonic/online.ts: ≥ 0.95 is artist and title equal
@@ -46,30 +46,48 @@ function splitFileName(stem: string): [string, string] | null {
 }
 
 // Before uploading: an artist (and title) for a file without an artist
-// tag, from its name; an album for one that would otherwise end up in
-// "Unknown Album". null when there's nothing to fill or no confident match.
+// tag, from its name; a clean title for one without a title tag; an album
+// for one that would otherwise end up in "Unknown Album". The name is
+// split by its " - " first, by Workers AI (parseFileName) when that's not
+// enough — every guess confirmed by an online match. null when there's
+// nothing to fill or no confident match.
 export async function findMissingTags(file: {
   artist?: string;
   title?: string;
-  stem: string;
+  fileName: string;
+  folder: string;
   needAlbum: boolean;
   duration?: number;
 }): Promise<OnlineFill | null> {
+  if (file.artist && file.title && !file.needAlbum) return null;
+  const tried = new Set<string>();
+  // fill: what the guess adds over the tags.
+  const attempt = async (artist: string, title: string, fill: OnlineFill): Promise<OnlineFill | null> => {
+    const key = `${artist}\u0000${title}`;
+    if (!artist || !title || tried.has(key)) return null;
+    tried.add(key);
+    const match = await confidentSong(artist, title, file.duration);
+    // The file's own spelling, which the match agrees with anyway.
+    return match ? { ...fill, ...albumFrom(match, file.needAlbum), match } : null;
+  };
   try {
-    if (!file.artist) {
-      if (file.title) return null; // a title but no artist: nothing to search with
-      const parts = splitFileName(file.stem);
-      if (!parts) return null;
-      for (const [artist, title] of [parts, [parts[1], parts[0]]]) {
-        const match = await confidentSong(artist, title, file.duration);
-        // The file name's spelling, which the match agrees with anyway.
-        if (match) return { artist, title, ...albumFrom(match, file.needAlbum), match };
+    const stem = file.fileName.replace(/\.[^.]+$/, "");
+    if (!file.artist && !file.title) {
+      const parts = splitFileName(stem);
+      if (parts) {
+        for (const [artist, title] of [parts, [parts[1], parts[0]]]) {
+          const found = await attempt(artist, title, { artist, title });
+          if (found) return found;
+        }
       }
-      return null;
     }
-    if (!file.needAlbum || !file.title) return null;
-    const match = await confidentSong(file.artist, file.title, file.duration);
-    return match ? { ...albumFrom(match, true), match } : null;
+    if (file.artist && file.title) return await attempt(file.artist, file.title, {});
+
+    const parsed = await parseFileName(file.fileName, file.folder).catch(() => null);
+    const artist = file.artist || parsed?.artist;
+    const title = file.title || parsed?.title || (file.artist ? stem : undefined);
+    if (!artist || !title) return null;
+    return await attempt(artist, title, { artist: file.artist ? undefined : artist, title: file.title ? undefined : title });
   } catch {
     return null;
   }
@@ -126,6 +144,7 @@ export async function addCovers(
 ): Promise<string | undefined> {
   const notes: string[] = [];
   if (opts.fill?.artist) notes.push("artist from file name");
+  else if (opts.fill?.title) notes.push("title from file name");
   if (opts.fill?.album) notes.push("album found online");
 
   if (opts.realAlbum) {

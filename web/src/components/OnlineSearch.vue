@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { reactive, ref } from "vue";
-import { searchOnline, SubsonicError, type OnlineMatch } from "../api/subsonic";
+import { parseFileName, searchOnline, SubsonicError, type OnlineMatch } from "../api/subsonic";
 import { formatDuration } from "../utils/format";
 
 // "Find online…" inside the album/song edit dialogs: searches iTunes and
 // MusicBrainz and lets the user pick a match, which the dialog then puts in
 // its form for review — nothing is saved from here.
-const props = defineProps<{ kind: "album" | "song"; artist: string; name: string; duration?: number }>();
+// `path`: the song's file path, which Workers AI can read artist/title out
+// of when the tags are no help.
+const props = defineProps<{ kind: "album" | "song"; artist: string; name: string; duration?: number; path?: string }>();
 const emit = defineEmits<{ pick: [match: OnlineMatch]; back: [] }>();
 
 const query = reactive({ artist: props.artist, name: props.name });
@@ -35,6 +37,29 @@ async function search() {
   }
 }
 void search();
+
+const parsing = ref(false);
+async function readFileName() {
+  if (!props.path) return;
+  error.value = "";
+  parsing.value = true;
+  try {
+    const slash = props.path.lastIndexOf("/");
+    const parsed = await parseFileName(props.path.slice(slash + 1), slash > 0 ? props.path.slice(0, slash) : "");
+    if (!parsed.artist && !parsed.title) {
+      error.value = "Couldn't make out an artist or title in the file name.";
+      return;
+    }
+    if (parsed.artist) query.artist = parsed.artist;
+    if (parsed.title) query.name = parsed.title;
+  } catch (e) {
+    error.value = e instanceof SubsonicError || e instanceof Error ? e.message : String(e);
+    return;
+  } finally {
+    parsing.value = false;
+  }
+  await search();
+}
 
 function pick(m: OnlineMatch, i: number) {
   emit("pick", noCover.has(i) ? { ...m, coverUrl: undefined, thumbUrl: undefined } : m);
@@ -67,6 +92,16 @@ function details(m: OnlineMatch): string {
         <span v-if="loading" class="spinner"></span> Search
       </button>
     </form>
+    <button
+      v-if="kind === 'song' && path"
+      type="button"
+      class="inline-flex items-center gap-2 text-xs"
+      :disabled="parsing || loading"
+      :title="path"
+      @click="readFileName"
+    >
+      <span v-if="parsing" class="spinner"></span> ✨ Read artist/title from the file name
+    </button>
 
     <p v-if="error" class="error">{{ error }}</p>
     <p v-for="e in sourceErrors" :key="e" class="text-xs text-[var(--text-dim)]">⚠ {{ e }}</p>

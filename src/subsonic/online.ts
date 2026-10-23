@@ -44,7 +44,7 @@ const toSimplified = Converter({ from: "tw", to: "cn" });
 
 // Traditional/simplified, case, punctuation and bracketed suffixes
 // ("(Deluxe Edition)", "[Live]") don't count as differences.
-function normalize(s: string): string {
+export function normalize(s: string): string {
   return toSimplified(s)
     .toLowerCase()
     .replace(/\(.*?\)|\[.*?\]|（.*?）|【.*?】/g, "")

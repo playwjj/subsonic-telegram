@@ -134,6 +134,7 @@ const albumAffected = computed(() => changed.value.some((f) => f.key === "year" 
       :artist="text('artist')"
       :name="text('title')"
       :duration="songs[0]?.duration"
+      :path="songs[0]?.path"
       @pick="onMatch"
       @back="searching = false"
     />

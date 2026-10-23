@@ -698,6 +698,13 @@ export async function searchOnline(
   };
 }
 
+// Artist/title read out of a file name (and its folder) by Workers AI;
+// only text that's really in the name comes back.
+export async function parseFileName(name: string, folder = ""): Promise<{ artist?: string; title?: string }> {
+  const body = await call<{ parsedName: { artist?: string; title?: string } }>("parseFileName", { name, folder });
+  return body.parsedName;
+}
+
 // `local`: the library's song titles; each returned track's `match` is an
 // index into it.
 export async function getOnlineAlbumTracks(albumRef: string, local: string[]): Promise<OnlineTrack[]> {

@@ -14,4 +14,7 @@ export interface Env {
   // Days a deleted item stays in the trash before the daily cron purges it
   // (default 30, see src/subsonic/trash.ts).
   TRASH_RETENTION_DAYS?: string;
+  // Workers AI, for reading artist/title out of messy file names (see
+  // src/subsonic/fileNames.ts). Optional: without it that just isn't offered.
+  AI?: Ai;
 }

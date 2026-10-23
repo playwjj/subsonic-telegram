@@ -17,6 +17,7 @@ import * as folders from "./subsonic/folders";
 import * as trash from "./subsonic/trash";
 import * as metadata from "./subsonic/metadata";
 import * as online from "./subsonic/online";
+import { parseFileName } from "./subsonic/fileNames";
 import * as captions from "./subsonic/captions";
 import * as storageInfo from "./subsonic/storage";
 import * as q from "./db/queries";
@@ -1039,6 +1040,15 @@ export default {
           ),
           format,
         );
+      }
+
+      // Artist/title read out of a file name (and its folder) by Workers AI,
+      // for files without tags; empty fields when it can't tell.
+      case "parseFileName": {
+        const name = params.get("name");
+        if (!name) return respond(subsonicError(ERR.MISSING_PARAM, "Missing name"), format);
+        const parsed = await parseFileName(env.AI, name, params.get("folder") ?? "");
+        return respond(subsonicSuccess(node("parsedName", { ...parsed })), format);
       }
 
       // A match's album track list, each matched to one of the given local

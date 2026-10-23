@@ -214,7 +214,9 @@ async function run(item: UploadItem) {
     item.fill = await findMissingTags({
       artist: o.artist || t.artist,
       title: t.title,
-      stem: stem(item.file.name),
+      fileName: item.file.name,
+      // The automatic Uploads/YYYY-MM folder says nothing about the song.
+      folder: item.folder.replace(/^Uploads\/\d{4}-\d{2}(\/|$)/, ""),
       needAlbum: !o.album && !t.album && !albumFromFolder(item.folder),
       duration: t.duration,
     });
