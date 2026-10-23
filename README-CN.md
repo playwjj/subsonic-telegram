@@ -249,6 +249,10 @@ npm run fix-covers -- --artist-photos [--limit=N] [--dry-run] [--retry-failed]
 
 启用 workflow 前，请在仓库 Secrets 中添加：`TG_BOT_TOKEN`、`TG_CHANNEL_ID`、`CF_ACCOUNT_ID`、`CF_API_TOKEN` 和 `D1_DATABASE_ID`。Cloudflare API Token 需要有查询目标 D1 数据库的权限。
 
+### 每周备份 D1
+
+`.github/workflows/backup-d1.yml` 每周日 UTC 时间 20:00 运行（也可以在 GitHub Actions 页面手动触发）。它用 `wrangler d1 export` 导出整个 D1 数据库并 gzip 压缩（约 4000 首歌时大约 1 MB），然后让 bot 把文件发到存歌的同一个 Telegram 频道，文件名是 `subsonic-telegram-d1-<日期>.sql.gz`。用的是和自动修复封面相同的仓库 Secrets，Cloudflare API Token 还需要有 D1 导出权限（D1 Edit）。导出会把每一行读一遍，导出期间 D1 不响应其他请求——以现在的数据量只要几秒。恢复方法：解压后对一个空数据库执行 `wrangler d1 execute subsonic-telegram --remote --file=<文件>.sql`。
+
 ## Web UI
 
 `web/` 是一个 Vue 3 + Vite 单页应用，直接调 `/rest/*` API（跟第三方 Subsonic 客户端走的是同一套接口），提供浏览歌库、播放、管理 playlist 的界面，另外 Folders 页面是一个网盘式的文件管理器（多选、移动、重命名、递归删除），并支持在浏览器里批量上传文件或整个文件夹（大规模导入还是交给上面的 CLI 脚本），细节见下面的[从 Web UI 管理歌库](#从-web-ui-管理歌库)。

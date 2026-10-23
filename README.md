@@ -250,6 +250,10 @@ The GitHub Actions workflow `.github/workflows/fix-covers.yml` runs daily at 02:
 
 Add these repository secrets before enabling the workflow: `TG_BOT_TOKEN`, `TG_CHANNEL_ID`, `CF_ACCOUNT_ID`, `CF_API_TOKEN`, and `D1_DATABASE_ID`. The Cloudflare API token needs permission to query the target D1 database.
 
+### Weekly D1 backup
+
+`.github/workflows/backup-d1.yml` runs every Sunday at 20:00 UTC (or manually from the Actions page). It exports the whole D1 database with `wrangler d1 export`, gzips it (about 1 MB for ~4,000 songs) and has the bot post it to the same Telegram channel the songs are in, as `subsonic-telegram-d1-<date>.sql.gz`. It uses the same repository secrets as the cover workflow; the Cloudflare API token also needs D1 export rights (D1 Edit). An export reads every row once and D1 answers nothing else while it runs — a few seconds at this size. To restore: gunzip the file and run `wrangler d1 execute subsonic-telegram --remote --file=<file>.sql` against an empty database.
+
 ## Web UI
 
 `web/` is a Vue 3 + Vite single-page app that calls the `/rest/*` API directly (the same interface third-party Subsonic clients use), providing a browsing/playback/playlist-management UI, plus a file-manager-style Folders page (multi-select, move, rename, recursive delete) and batch upload (files or whole folders) for managing the library directly from the browser (bulk import still stays the CLI script's job — see [Managing the library from the Web UI](#managing-the-library-from-the-web-ui) below).

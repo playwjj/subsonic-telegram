@@ -1,0 +1,53 @@
+name: Back up D1
+
+# Weekly: exports the whole D1 database (the library's only index of what's
+# in the channel), gzips it and posts it to the Telegram channel the songs
+# are in. D1 answers no other queries while an export runs (a few seconds
+# at this size), hence a quiet hour: Sunday 20:00 UTC.
+on:
+  schedule:
+    - cron: "0 20 * * 0"
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+      TG_CHANNEL_ID: ${{ secrets.TG_CHANNEL_ID }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Export D1
+        run: |
+          name="subsonic-telegram-d1-$(date -u +%Y-%m-%d).sql"
+          npx wrangler d1 export subsonic-telegram --remote --output "$name"
+          songs=$(grep -c '^INSERT INTO "tracks"' "$name" || true)
+          gzip "$name"
+          echo "BACKUP_FILE=$name.gz" >> "$GITHUB_ENV"
+          echo "BACKUP_SONGS=$songs" >> "$GITHUB_ENV"
+
+      # Restore: gunzip, then `wrangler d1 execute subsonic-telegram --remote
+      # --file=<file>.sql` into an empty database.
+      - name: Post to the Telegram channel
+        run: |
+          curl -sS -o response.json "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
+            -F chat_id="$TG_CHANNEL_ID" \
+            -F document=@"$BACKUP_FILE" \
+            -F caption="D1 backup · $(date -u +%Y-%m-%d) · ${BACKUP_SONGS} songs"
+          jq -e '.ok' response.json > /dev/null || { jq '{error_code, description}' response.json; exit 1; }
