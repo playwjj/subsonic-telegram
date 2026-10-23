@@ -1,9 +1,9 @@
 // The batch upload queue. Lives outside any view so uploads keep going while
 // the user browses elsewhere; UploadPanel shows it, UploadDialog fills it.
 import { computed, reactive } from "vue";
-import { setCoverArt, uploadTrack, UploadError, MAX_UPLOAD_TRACK_BYTES, type Song, type UploadTrackMetadata } from "../api/subsonic";
+import { uploadTrack, UploadError, MAX_UPLOAD_TRACK_BYTES, type Song, type UploadTrackMetadata } from "../api/subsonic";
 import { baseName, joinPath } from "../utils/format";
-import { prepareCover } from "../utils/image";
+import { addCovers, findMissingTags, type OnlineFill } from "./uploadEnrich";
 import { extensionOf, isAudio, type PickedFile } from "../utils/pickFiles";
 
 // Two at a time: enough to overlap one file's trip to the Worker with the
@@ -57,6 +57,12 @@ export interface UploadItem {
   song?: Song;
   overrides?: Overrides;
   onConflict?: "rename" | "skip";
+  // "Fill in missing info online" was on for its batch.
+  fillOnline?: boolean;
+  // What findMissingTags found (null: nothing); undefined until looked up.
+  fill?: OnlineFill | null;
+  // What was added after uploading (a cover, year…), for the upload panel.
+  note?: string;
 }
 
 export const uploads = reactive({
@@ -143,12 +149,13 @@ function albumFromFolder(folder: string): string | undefined {
 function metadataFor(item: UploadItem): UploadTrackMetadata {
   const t = item.tags ?? {};
   const o = item.overrides ?? {};
+  const f = item.fill ?? {};
   return {
-    title: t.title || stem(item.file.name),
-    artist: o.artist || t.artist || "Unknown Artist",
-    album: o.album || t.album || albumFromFolder(item.folder) || "Unknown Album",
-    year: o.year ?? t.year,
-    genre: o.genre || t.genre,
+    title: t.title || f.title || stem(item.file.name),
+    artist: o.artist || t.artist || f.artist || "Unknown Artist",
+    album: o.album || t.album || albumFromFolder(item.folder) || f.album || "Unknown Album",
+    year: o.year ?? t.year ?? f.year,
+    genre: o.genre || t.genre || f.genre,
     trackNumber: t.trackNumber,
     discNumber: t.discNumber,
     duration: t.duration,
@@ -160,13 +167,14 @@ function metadataFor(item: UploadItem): UploadTrackMetadata {
 
 export function enqueue(
   items: UploadItem[],
-  opts: { folder: string; overrides: Overrides; onConflict: "rename" | "skip" },
+  opts: { folder: string; overrides: Overrides; onConflict: "rename" | "skip"; fillOnline: boolean },
 ): void {
   for (const item of items) {
     if (item.invalid) continue;
     item.folder = joinPath(opts.folder, item.relDir) || defaultUploadFolder();
     item.overrides = opts.overrides;
     item.onConflict = opts.onConflict;
+    item.fillOnline = opts.fillOnline;
     item.status = "queued";
     uploads.items.push(item);
   }
@@ -200,7 +208,18 @@ async function run(item: UploadItem) {
   item.progress = 0;
   item.error = undefined;
   await readTags(item);
-  if (item.status !== "uploading") return; // cancelled while reading tags
+  if (item.fillOnline && item.fill === undefined) {
+    const t = item.tags ?? {};
+    const o = item.overrides ?? {};
+    item.fill = await findMissingTags({
+      artist: o.artist || t.artist,
+      title: t.title,
+      stem: stem(item.file.name),
+      needAlbum: !o.album && !t.album && !albumFromFolder(item.folder),
+      duration: t.duration,
+    });
+  }
+  if (item.status !== "uploading") return; // cancelled while reading tags / looking up
 
   const { done, abort } = uploadTrack(item.file, metadataFor(item), (fraction) => {
     item.progress = fraction;
@@ -211,8 +230,12 @@ async function run(item: UploadItem) {
     item.song = await done;
     item.status = "done";
     uploads.completed++;
-    // Still holding this upload slot: the cover is one more Telegram message.
-    await addEmbeddedCover(item, item.song);
+    // Still holding this upload slot: a cover is one more Telegram message.
+    item.note = await addCovers(item.file, item.song, {
+      realAlbum: !!(item.overrides?.album || item.tags?.album || item.fill?.album),
+      online: !!item.fillOnline,
+      fill: item.fill,
+    });
   } catch (e) {
     // cancel() may have flipped it meanwhile (TS can't see that across the await).
     if ((item.status as UploadStatus) === "cancelled") return;
@@ -231,36 +254,6 @@ async function run(item: UploadItem) {
     }
   } finally {
     aborts.delete(item.id);
-  }
-}
-
-// Albums this page has already given (or tried to give) an embedded cover,
-// so a 12-track album sends its picture once, not 12 times.
-const coveredAlbums = new Set<string>();
-
-// The file's embedded front cover becomes its album's cover, unless the
-// album already has one (onlyIfMissing, checked by the Worker). Only for a
-// real album (from the tags or the batch's album override), not one named
-// after a folder: a folder of loose songs would get whichever song's
-// picture came first. Best effort — the song itself is already uploaded.
-async function addEmbeddedCover(item: UploadItem, song: Song): Promise<void> {
-  if (!(item.overrides?.album || item.tags?.album) || coveredAlbums.has(song.albumId)) return;
-  coveredAlbums.add(song.albumId);
-  try {
-    const { parseBlob } = await import("music-metadata");
-    const { common } = await parseBlob(item.file, { skipPostHeaders: true });
-    const pictures = common.picture ?? [];
-    const picture = pictures.find((p) => p.type === "Cover (front)") ?? pictures[0];
-    // "AutoGenerated": placeholder art some tagging tools write (see
-    // scripts/import.ts), worse than none.
-    if (!picture || picture.description === "AutoGenerated") return;
-    const type = picture.format.startsWith("image/") ? picture.format : "image/jpeg";
-    const blob = await prepareCover(new Blob([new Uint8Array(picture.data)], { type }));
-    await setCoverArt(song.albumId, blob, { onlyIfMissing: true });
-  } catch {
-    // Unreadable picture, Telegram's rate limit…: the song just goes
-    // without, as before. Let a later song of the album try again.
-    coveredAlbums.delete(song.albumId);
   }
 }
 

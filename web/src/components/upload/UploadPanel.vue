@@ -59,7 +59,10 @@ function statusText(item: UploadItem): string {
     case "processing":
       return "Sending to Telegram…";
     case "done":
-      return item.song && item.song.path && !item.song.path.endsWith(`/${item.file.name}`) ? "Done (renamed)" : "Done";
+      return (
+        (item.song && item.song.path && !item.song.path.endsWith(`/${item.file.name}`) ? "Done (renamed)" : "Done") +
+        (item.note ? ` · ${item.note}` : "")
+      );
     case "skipped":
       return "Skipped — already exists";
     case "cancelled":

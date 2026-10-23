@@ -992,10 +992,10 @@ export default {
       case "setCoverArt": {
         const id = params.get("id");
         if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
-        let image: { bytes: Uint8Array; contentType: string } | null = null;
+        let image: Parameters<typeof metadata.setCoverArt>[3] = null;
         const imageUrl = params.get("url");
         if (imageUrl) {
-          image = await online.fetchCoverImage(imageUrl);
+          image = () => online.fetchCoverImage(imageUrl);
         } else if (params.get("remove") !== "true") {
           const contentType = request.headers.get("Content-Type") ?? "";
           if (!contentType.startsWith("image/")) return respond(subsonicError(0, "Not an image"), format);

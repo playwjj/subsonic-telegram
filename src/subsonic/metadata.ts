@@ -264,12 +264,14 @@ async function coverInUse(db: D1Database, ref: string): Promise<boolean> {
 // an artist, or a song's own cover (one that differs from its album's, see
 // tracks.cover_ref). The old image is deleted from Telegram unless still in
 // use. onlyIfMissing leaves an existing cover alone (an upload's embedded
-// cover shouldn't replace one the album already has).
+// cover shouldn't replace one the album already has); the image may be
+// given as a function, so a download it needs is skipped in that case.
+type CoverImage = { bytes: Uint8Array; contentType: string };
 export async function setCoverArt(
   db: D1Database,
   storage: StorageBackend,
   id: string,
-  image: { bytes: Uint8Array; contentType: string } | null,
+  imageOrLoader: CoverImage | (() => Promise<CoverImage>) | null,
   opts: { onlyIfMissing?: boolean } = {},
 ): Promise<{ kind: "album" | "artist" | "song"; changed: boolean }> {
   // Album, artist and track ids are md5s of different natural keys, so one
@@ -287,6 +289,7 @@ export async function setCoverArt(
   if (!kind) throw new MetadataError("Album, song or artist not found");
   if (opts.onlyIfMissing && oldRef) return { kind, changed: false };
   const table = kind === "album" ? "albums" : kind === "song" ? "tracks" : "artists";
+  const image = typeof imageOrLoader === "function" ? await imageOrLoader() : imageOrLoader;
 
   // Storage errors (Telegram's rate limit in particular) propagate as is.
   const ext = image?.contentType === "image/png" ? "png" : image?.contentType === "image/webp" ? "webp" : "jpg";

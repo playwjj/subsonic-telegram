@@ -16,6 +16,22 @@ const folder = ref(props.folder);
 const overrides = reactive({ artist: "", album: "", genre: "", year: undefined as number | undefined });
 const onConflict = ref<"skip" | "rename">("skip");
 
+// Remembered between uploads (just a preference, so storage failing is fine).
+const FILL_ONLINE_KEY = "upload.fillOnline";
+const fillOnline = ref(true);
+try {
+  fillOnline.value = localStorage.getItem(FILL_ONLINE_KEY) !== "false";
+} catch {
+  // default
+}
+watch(fillOnline, (on) => {
+  try {
+    localStorage.setItem(FILL_ONLINE_KEY, String(on));
+  } catch {
+    // not remembered
+  }
+});
+
 const valid = computed(() => items.filter((i) => !i.invalid));
 const invalidCount = computed(() => items.length - valid.value.length);
 const totalSize = computed(() => valid.value.reduce((n, i) => n + i.file.size, 0));
@@ -73,6 +89,7 @@ function start() {
       year: overrides.year || undefined,
     },
     onConflict: onConflict.value,
+    fillOnline: fillOnline.value,
   });
   emit("close");
 }
@@ -101,6 +118,17 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
           <label>Year <input v-model.number="overrides.year" type="number" class="mt-1 w-full" placeholder="From tags" /></label>
         </div>
       </details>
+
+      <label class="flex items-start gap-2">
+        <input v-model="fillOnline" type="checkbox" class="mt-0.5" />
+        <span>
+          Fill in missing info online
+          <span class="block text-xs text-[var(--text-dim)]">
+            Covers for albums without one, artist and title from file names like “Artist - Title”, album, year and
+            genre — only what the files don't say, and only from a close match (iTunes / MusicBrainz).
+          </span>
+        </span>
+      </label>
 
       <div v-if="existingCount" class="rounded-lg border border-[var(--border)] px-3 py-2">
         <p>{{ plural(existingCount, "file") }} already {{ existingCount === 1 ? "exists" : "exist" }} in the destination.</p>
