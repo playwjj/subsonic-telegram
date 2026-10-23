@@ -13,18 +13,17 @@ interface LrclibResponse {
   instrumental: boolean;
 }
 
+// null: LRCLIB answered that it doesn't have the song. Throws when the
+// lookup itself failed (network, 5xx, rate limit), so that isn't cached as a
+// miss.
 async function rawGet(artist: string, title: string): Promise<LrclibResponse | null> {
   const url = new URL("https://lrclib.net/api/get");
   url.searchParams.set("artist_name", artist);
   url.searchParams.set("track_name", title);
 
-  let res: Response;
-  try {
-    res = await fetch(url, { headers: { "User-Agent": LRCLIB_USER_AGENT } });
-  } catch {
-    return null;
-  }
-  if (!res.ok) return null;
+  const res = await fetch(url, { headers: { "User-Agent": LRCLIB_USER_AGENT } });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`LRCLIB ${res.status}`);
   return (await res.json()) as LrclibResponse;
 }
 
@@ -48,7 +47,7 @@ function firstArtist(artist: string): string {
   return artist.split(/[&、/,，]/)[0].trim();
 }
 
-async function lookupRaw(artist: string, title: string): Promise<LrclibResponse | null> {
+async function lookupUncached(artist: string, title: string): Promise<LrclibResponse | null> {
   const direct = await rawGet(artist, title);
   if (direct) return direct;
 
@@ -56,6 +55,32 @@ async function lookupRaw(artist: string, title: string): Promise<LrclibResponse 
   const cleanedTitle = stripDecorations(title);
   if (!cleanedTitle || (cleanedArtist === artist && cleanedTitle === title)) return null;
   return rawGet(cleanedArtist, cleanedTitle);
+}
+
+// LRCLIB's answer for a song rarely changes, and a player asks for it every
+// time the song comes up — so it's kept in the edge cache (Cache API: this
+// colo only, and a no-op on *.workers.dev). Misses are kept shorter, in case
+// the song gets added there.
+const FOUND_CACHE = "max-age=2592000";
+const MISSING_CACHE = "max-age=604800";
+
+async function lookupRaw(artist: string, title: string): Promise<LrclibResponse | null> {
+  const key = new Request(`https://lyrics-cache.invalid/?${new URLSearchParams({ artist, title })}`);
+  const cache = caches.default;
+  const cached = await cache.match(key).catch(() => undefined);
+  if (cached) return (await cached.json()) as LrclibResponse | null;
+
+  let data: LrclibResponse | null;
+  try {
+    data = await lookupUncached(artist, title);
+  } catch {
+    return null;
+  }
+  const response = new Response(JSON.stringify(data), {
+    headers: { "Content-Type": "application/json", "Cache-Control": data ? FOUND_CACHE : MISSING_CACHE },
+  });
+  await cache.put(key, response).catch(() => {});
+  return data;
 }
 
 // Synced lyrics are LRC-formatted ("[01:23.45]line"); classic Subsonic

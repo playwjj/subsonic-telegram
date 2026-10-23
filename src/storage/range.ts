@@ -8,13 +8,26 @@ export interface ByteRange {
 }
 
 // Parses a `Range: bytes=start-end` header against a known total length.
-// Returns null for "no range requested" (caller should send the whole body).
-export function parseRange(total: number, rangeHeader: string | null): ByteRange | null {
+// Returns null for "no range requested" (caller should send the whole body),
+// "unsatisfiable" for a range that starts past the end (caller should answer
+// 416 via rangeNotSatisfiable). A suffix longer than the file means all of it.
+export function parseRange(total: number, rangeHeader: string | null): ByteRange | "unsatisfiable" | null {
   const match = rangeHeader ? /^bytes=(\d*)-(\d*)$/.exec(rangeHeader) : null;
   if (!match || !(match[1] || match[2])) return null;
-  const start = match[1] ? Number(match[1]) : total - Number(match[2]);
-  const end = match[1] && match[2] ? Math.min(Number(match[2]), total - 1) : total - 1;
-  return { start, end };
+  if (!match[1]) {
+    const suffix = Number(match[2]);
+    if (suffix === 0 || total === 0) return "unsatisfiable";
+    return { start: Math.max(total - suffix, 0), end: total - 1 };
+  }
+  const start = Number(match[1]);
+  // "500-100" isn't a valid range at all: ignored, like no Range header.
+  if (match[2] && Number(match[2]) < start) return null;
+  if (start >= total) return "unsatisfiable";
+  return { start, end: match[2] ? Math.min(Number(match[2]), total - 1) : total - 1 };
+}
+
+export function rangeNotSatisfiable(total: number): Response {
+  return new Response(null, { status: 416, headers: { "content-range": `bytes */${total}` } });
 }
 
 export function rangeHeaders(contentType: string, total: number, range: ByteRange | null): Headers {

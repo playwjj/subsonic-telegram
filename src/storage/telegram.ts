@@ -1,5 +1,5 @@
 import type { DeleteFilesResult, FileCheck, StorageBackend } from "./types";
-import { parseRange, rangeHeaders } from "./range";
+import { parseRange, rangeHeaders, rangeNotSatisfiable } from "./range";
 
 interface TelegramRef {
   messageId: number;
@@ -103,6 +103,7 @@ export class TelegramStorage implements StorageBackend {
     }
 
     const range = parseRange(bytes.byteLength, rangeHeader);
+    if (range === "unsatisfiable") return rangeNotSatisfiable(bytes.byteLength);
     const body = range ? bytes.slice(range.start, range.end + 1) : bytes;
     const headers = rangeHeaders(resolvedType, bytes.byteLength, range);
     return new Response(body, { status: range ? 206 : 200, headers });

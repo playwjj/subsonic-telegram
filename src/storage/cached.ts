@@ -1,5 +1,5 @@
 import type { DeleteFilesResult, FileCheck, SourceStorage, StorageBackend } from "./types";
-import { parseRange, rangeHeaders } from "./range";
+import { parseRange, rangeHeaders, rangeNotSatisfiable } from "./range";
 import * as cache from "../db/cache";
 
 // Optional read-through cache in front of a SourceStorage (Telegram). Only
@@ -79,6 +79,7 @@ export class CachedStorage implements StorageBackend {
     this.ctx.waitUntil(this.populate(key, bytes, resolvedType));
 
     const range = parseRange(bytes.byteLength, rangeHeader);
+    if (range === "unsatisfiable") return rangeNotSatisfiable(bytes.byteLength);
     const body = range ? bytes.slice(range.start, range.end + 1) : bytes;
     const headers = rangeHeaders(resolvedType, bytes.byteLength, range);
     return new Response(body, { status: range ? 206 : 200, headers });
@@ -90,6 +91,7 @@ export class CachedStorage implements StorageBackend {
     rangeHeader: string | null,
   ): Promise<Response | null> {
     const range = parseRange(entry.size, rangeHeader);
+    if (range === "unsatisfiable") return rangeNotSatisfiable(entry.size);
     const object = await this.bucket.get(
       key,
       range ? { range: { offset: range.start, length: range.end - range.start + 1 } } : undefined,
