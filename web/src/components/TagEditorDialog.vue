@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
-import { getArtists, updateTracks, SubsonicError, type Song, type TagEdits } from "../api/subsonic";
+import { getArtists, setCoverArt, updateTracks, SubsonicError, type OnlineMatch, type Song, type TagEdits } from "../api/subsonic";
 import Modal from "./Modal.vue";
+import OnlineSearch from "./OnlineSearch.vue";
 
 // Edits the library tags of songs (`songIds`) and/or everything in some
 // folders (`folderPaths`). `songs` is what's known of all of them, only for
 // showing current values; `count` the total. Only changed fields are sent.
+// For a single song, "Find online…" fills the form (and offers the match's
+// cover as the song's own cover) from an iTunes/MusicBrainz match.
 const props = defineProps<{ songs: Song[]; songIds: string[]; folderPaths?: string[]; count: number }>();
 const emit = defineEmits<{ close: []; saved: [result: { updated: number; albumIds: string[] }] }>();
 
@@ -43,6 +46,34 @@ const isChanged = (key: Key) => text(key) !== initial[key].value.trim();
 
 const changed = computed(() => fields.value.filter((f) => isChanged(f.key)));
 
+// Only for one song picked by id (not "everything in a folder").
+const canSearch = computed(() => single.value && props.songIds.length === 1 && !props.folderPaths?.length);
+const searching = ref(false);
+const matchedFrom = ref<OnlineMatch | null>(null);
+const useCover = ref(true);
+const coverUrl = computed(() => (useCover.value ? matchedFrom.value?.coverUrl : undefined));
+
+function onMatch(m: OnlineMatch) {
+  searching.value = false;
+  matchedFrom.value = m;
+  useCover.value = true;
+  const values: Partial<Record<Key, string | number | undefined>> = {
+    title: m.title,
+    artist: m.artist,
+    album: m.album,
+    year: m.year,
+    genre: m.genre,
+    track: m.track,
+    disc: m.disc && (m.disc > 1 || props.songs[0]?.discNumber) ? m.disc : undefined,
+  };
+  for (const [key, value] of Object.entries(values)) if (value !== undefined && value !== "") form[key as Key] = String(value);
+}
+
+function resetForm() {
+  for (const f of FIELDS) form[f.key] = initial[f.key].value;
+  matchedFrom.value = null;
+}
+
 const artistNames = ref<string[]>([]);
 onMounted(async () => {
   try {
@@ -71,10 +102,15 @@ async function save() {
       edits.genre = raw || null;
     }
   }
-  if (!Object.keys(edits).length) return emit("close");
+  if (!Object.keys(edits).length && !coverUrl.value) return emit("close");
   saving.value = true;
   try {
-    const result = await updateTracks({ songIds: props.songIds, folderPaths: props.folderPaths }, edits);
+    const result = Object.keys(edits).length
+      ? await updateTracks({ songIds: props.songIds, folderPaths: props.folderPaths }, edits)
+      : { updated: 1, albumIds: [] };
+    // The song's own cover, not the album's: the album may well be a folder
+    // of unrelated songs (an album match is the way to set an album cover).
+    if (coverUrl.value) await setCoverArt(props.songIds[0], coverUrl.value);
     emit("saved", result);
   } catch (e) {
     error.value = e instanceof SubsonicError || e instanceof Error ? e.message : String(e);
@@ -87,11 +123,39 @@ const albumAffected = computed(() => changed.value.some((f) => f.key === "year" 
 </script>
 
 <template>
-  <Modal :title="single ? 'Edit tags' : `Edit tags of ${count.toLocaleString()} songs`" @close="emit('close')">
-    <form class="space-y-3 text-sm" @submit.prevent="save">
-      <p v-if="single && songs[0]?.path" class="truncate text-xs text-[var(--text-dim)]" :title="songs[0].path">
-        {{ songs[0].path }}
-      </p>
+  <Modal
+    :title="searching ? 'Find song online' : single ? 'Edit tags' : `Edit tags of ${count.toLocaleString()} songs`"
+    :wide="searching"
+    @close="emit('close')"
+  >
+    <OnlineSearch
+      v-if="searching"
+      kind="song"
+      :artist="text('artist')"
+      :name="text('title')"
+      :duration="songs[0]?.duration"
+      @pick="onMatch"
+      @back="searching = false"
+    />
+    <form v-else class="space-y-3 text-sm" @submit.prevent="save">
+      <div v-if="single" class="flex items-center gap-2">
+        <p v-if="songs[0]?.path" class="min-w-0 flex-1 truncate text-xs text-[var(--text-dim)]" :title="songs[0].path">
+          {{ songs[0].path }}
+        </p>
+        <button v-if="canSearch" type="button" class="ml-auto shrink-0" @click="searching = true">🔍 Find online…</button>
+      </div>
+      <div v-if="matchedFrom" class="flex items-center gap-3 text-xs">
+        <img v-if="matchedFrom.thumbUrl" :src="matchedFrom.thumbUrl" alt="" class="match-cover" />
+        <div class="space-y-1">
+          <p class="text-[var(--text-dim)]">
+            Filled in from {{ matchedFrom.source === "itunes" ? "iTunes" : "MusicBrainz" }} — check before saving.
+            <button type="button" class="link" @click="resetForm">Reset</button>
+          </p>
+          <label v-if="matchedFrom.coverUrl" class="flex items-center gap-2">
+            <input v-model="useCover" type="checkbox" /> Use this cover for the song
+          </label>
+        </div>
+      </div>
       <div class="grid grid-cols-2 gap-3">
         <label v-for="f in fields" :key="f.key" :class="{ 'col-span-2': !f.numeric && f.key !== 'genre' }">
           <span class="flex items-center gap-1">
@@ -121,7 +185,7 @@ const albumAffected = computed(() => changed.value.some((f) => f.key === "year" 
 
       <div class="flex justify-end gap-2 pt-2">
         <button type="button" :disabled="saving" @click="emit('close')">Cancel</button>
-        <button type="submit" class="primary inline-flex items-center gap-2" :disabled="saving || !changed.length">
+        <button type="submit" class="primary inline-flex items-center gap-2" :disabled="saving || (!changed.length && !coverUrl)">
           <span v-if="saving" class="spinner"></span> Save
         </button>
       </div>
@@ -139,5 +203,19 @@ const albumAffected = computed(() => changed.value.some((f) => f.key === "year" 
 .primary {
   border-color: var(--accent);
   color: var(--accent);
+}
+.match-cover {
+  width: 3rem;
+  height: 3rem;
+  flex-shrink: 0;
+  border-radius: 6px;
+  object-fit: cover;
+}
+.link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  text-decoration: underline;
 }
 </style>

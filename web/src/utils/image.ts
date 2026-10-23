@@ -4,7 +4,7 @@
 const MAX_SIDE = 1200;
 const KEEP_BELOW_BYTES = 600 * 1024;
 
-export async function prepareCover(file: File): Promise<Blob> {
+export async function prepareCover(file: Blob): Promise<Blob> {
   if (!file.type.startsWith("image/")) throw new Error("Not an image file");
   const bitmap = await createImageBitmap(file).catch(() => {
     throw new Error("Couldn't read that image");

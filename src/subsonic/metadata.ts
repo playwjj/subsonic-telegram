@@ -260,21 +260,33 @@ async function coverInUse(db: D1Database, ref: string): Promise<boolean> {
   return !!row?.used;
 }
 
-// Replaces (bytes) or removes (null) the cover of an album, or the photo of
-// an artist. The old image is deleted from Telegram unless still in use.
+// Replaces (bytes) or removes (null) the cover of an album, the photo of
+// an artist, or a song's own cover (one that differs from its album's, see
+// tracks.cover_ref). The old image is deleted from Telegram unless still in
+// use. onlyIfMissing leaves an existing cover alone (an upload's embedded
+// cover shouldn't replace one the album already has).
 export async function setCoverArt(
   db: D1Database,
   storage: StorageBackend,
   id: string,
   image: { bytes: Uint8Array; contentType: string } | null,
-): Promise<"album" | "artist"> {
-  const album = await db.prepare(`SELECT cover_ref FROM albums WHERE id = ?`).bind(id).first<{ cover_ref: string | null }>();
-  const artist = album
-    ? null
-    : await db.prepare(`SELECT cover_ref FROM artists WHERE id = ?`).bind(id).first<{ cover_ref: string | null }>();
-  const table = album ? "albums" : artist ? "artists" : null;
-  if (!table) throw new MetadataError("Album or artist not found");
-  const oldRef = (album ?? artist)!.cover_ref;
+  opts: { onlyIfMissing?: boolean } = {},
+): Promise<{ kind: "album" | "artist" | "song"; changed: boolean }> {
+  // Album, artist and track ids are md5s of different natural keys, so one
+  // id never matches more than one of these.
+  let kind: "album" | "artist" | "song" | null = null;
+  let oldRef: string | null = null;
+  for (const [table, k] of [["albums", "album"], ["tracks", "song"], ["artists", "artist"]] as const) {
+    const row = await db.prepare(`SELECT cover_ref FROM ${table} WHERE id = ?`).bind(id).first<{ cover_ref: string | null }>();
+    if (row) {
+      kind = k;
+      oldRef = row.cover_ref;
+      break;
+    }
+  }
+  if (!kind) throw new MetadataError("Album, song or artist not found");
+  if (opts.onlyIfMissing && oldRef) return { kind, changed: false };
+  const table = kind === "album" ? "albums" : kind === "song" ? "tracks" : "artists";
 
   // Storage errors (Telegram's rate limit in particular) propagate as is.
   const ext = image?.contentType === "image/png" ? "png" : image?.contentType === "image/webp" ? "webp" : "jpg";
@@ -284,7 +296,7 @@ export async function setCoverArt(
   if (oldRef && oldRef !== newRef && !(await coverInUse(db, oldRef))) {
     await deleteFilesOrQueue(db, storage, [oldRef]);
   }
-  return album ? "album" : "artist";
+  return { kind, changed: true };
 }
 
 // --- duplicates ---

@@ -626,16 +626,83 @@ export async function updateTracks(
   return { updated: body.updateResult.updated, albumIds: (body.updateResult.album ?? []).map((a) => a.id) };
 }
 
-// An album's cover or an artist's photo: a new image, or null to remove it.
-export async function setCoverArt(id: string, image: Blob | null): Promise<void> {
-  const search = buildSearch({ id, remove: image ? undefined : "true" }, getCredentials());
+// An album's cover, an artist's photo or a song's own cover: a new image,
+// the URL of an online match's cover (fetched by the Worker), or null to
+// remove it. onlyIfMissing keeps an existing one; resolves to whether it
+// changed.
+export async function setCoverArt(
+  id: string,
+  image: Blob | string | null,
+  opts: { onlyIfMissing?: boolean } = {},
+): Promise<boolean> {
+  const blob = image instanceof Blob ? image : null;
+  const search = buildSearch(
+    {
+      id,
+      url: typeof image === "string" ? image : undefined,
+      remove: image === null ? "true" : undefined,
+      onlyIfMissing: opts.onlyIfMissing ? "true" : undefined,
+    },
+    getCredentials(),
+  );
   const res = await fetch(`/rest/setCoverArt.view?${search.toString()}`, {
     method: "POST",
-    headers: image ? { "Content-Type": image.type } : undefined,
-    body: image ?? undefined,
+    headers: blob ? { "Content-Type": blob.type } : undefined,
+    body: blob ?? undefined,
   });
-  await parseResponse(res);
-  coverVersions[id] = (coverVersions[id] ?? 0) + 1;
+  const body = await parseResponse<{ coverArt: { changed: boolean } }>(res);
+  if (body.coverArt.changed) coverVersions[id] = (coverVersions[id] ?? 0) + 1;
+  return body.coverArt.changed;
+}
+
+// --- online metadata (src/subsonic/online.ts) ---
+
+export interface OnlineMatch {
+  source: "itunes" | "musicbrainz";
+  albumRef?: string;
+  title?: string;
+  artist: string;
+  album?: string;
+  year?: number;
+  genre?: string;
+  track?: number;
+  disc?: number;
+  trackCount?: number;
+  duration?: number;
+  coverUrl?: string;
+  thumbUrl?: string;
+  score: number;
+}
+
+export interface OnlineTrack {
+  title: string;
+  track?: number;
+  disc?: number;
+  duration?: number;
+  match?: number;
+}
+
+export async function searchOnline(
+  kind: "album" | "song",
+  artist: string,
+  name: string,
+): Promise<{ matches: OnlineMatch[]; errors: string[] }> {
+  const body = await call<{ onlineMatches: { match?: OnlineMatch[]; error?: { message: string }[] } }>("searchOnline", {
+    kind,
+    artist,
+    [kind === "song" ? "title" : "album"]: name,
+  });
+  return {
+    matches: body.onlineMatches.match ?? [],
+    errors: (body.onlineMatches.error ?? []).map((e) => e.message),
+  };
+}
+
+// `local`: the library's song titles; each returned track's `match` is an
+// index into it.
+export async function getOnlineAlbumTracks(albumRef: string, local: string[]): Promise<OnlineTrack[]> {
+  const body = await callPost<{ onlineTracks: { track?: OnlineTrack[] } }>("getOnlineAlbumTracks", { albumRef, local });
+  return body.onlineTracks.track ?? [];
 }
 
 export type DuplicateMode = "tags" | "size";

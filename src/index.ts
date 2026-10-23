@@ -16,6 +16,7 @@ import * as media from "./subsonic/media";
 import * as folders from "./subsonic/folders";
 import * as trash from "./subsonic/trash";
 import * as metadata from "./subsonic/metadata";
+import * as online from "./subsonic/online";
 import * as captions from "./subsonic/captions";
 import * as storageInfo from "./subsonic/storage";
 import * as q from "./db/queries";
@@ -984,13 +985,18 @@ export default {
         );
       }
 
-      // Replaces an album's cover (or an artist's photo) with the image in
-      // the request body, or removes it with remove=true.
+      // Replaces an album's cover (or an artist's photo, or a song's own
+      // cover) with the image in the request body, or the one at url= (a
+      // cover from searchOnline), or removes it with remove=true.
+      // onlyIfMissing=true keeps an existing one.
       case "setCoverArt": {
         const id = params.get("id");
         if (!id) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
         let image: { bytes: Uint8Array; contentType: string } | null = null;
-        if (params.get("remove") !== "true") {
+        const imageUrl = params.get("url");
+        if (imageUrl) {
+          image = await online.fetchCoverImage(imageUrl);
+        } else if (params.get("remove") !== "true") {
           const contentType = request.headers.get("Content-Type") ?? "";
           if (!contentType.startsWith("image/")) return respond(subsonicError(0, "Not an image"), format);
           const bytes = new Uint8Array(await request.arrayBuffer());
@@ -1001,14 +1007,50 @@ export default {
           image = { bytes, contentType };
         }
         try {
-          const kind = await metadata.setCoverArt(env.DB, storage, id, image);
-          return respond(subsonicSuccess(node("coverArt", { id, kind })), format);
+          const { kind, changed } = await metadata.setCoverArt(env.DB, storage, id, image, {
+            onlyIfMissing: params.get("onlyIfMissing") === "true",
+          });
+          return respond(subsonicSuccess(node("coverArt", { id, kind, changed })), format);
         } catch (err) {
           if (err instanceof TelegramRateLimitError) {
             return respond(subsonicError(0, err.message, { retryAfter: err.retryAfter }), format);
           }
           throw err;
         }
+      }
+
+      // Candidate metadata from iTunes/MusicBrainz for the web UI's "Find
+      // online…": kind=album (artist, album) or kind=song (artist, title).
+      case "searchOnline": {
+        const kind = params.get("kind") === "song" ? "song" : "album";
+        const { matches, errors } = await online.searchOnline(
+          kind,
+          params.get("artist") ?? "",
+          params.get(kind === "song" ? "title" : "album") ?? "",
+        );
+        return respond(
+          subsonicSuccess(
+            node("onlineMatches", undefined, {
+              lists: {
+                match: matches.map((m) => node("match", { ...m })),
+                error: errors.map((e) => node("error", { message: e })),
+              },
+            }),
+          ),
+          format,
+        );
+      }
+
+      // A match's album track list, each matched to one of the given local
+      // titles (local=, repeatable) where possible.
+      case "getOnlineAlbumTracks": {
+        const ref = params.get("albumRef");
+        if (!ref) return respond(subsonicError(ERR.MISSING_PARAM, "Missing albumRef"), format);
+        const tracks = await online.getOnlineAlbumTracks(ref, params.getAll("local"));
+        return respond(
+          subsonicSuccess(node("onlineTracks", undefined, { lists: { track: tracks.map((t) => node("track", { ...t })) } })),
+          format,
+        );
       }
 
       // Groups of likely duplicate songs: mode=tags (same title and artist,
