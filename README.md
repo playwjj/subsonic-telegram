@@ -8,7 +8,7 @@
 
 Turn Telegram into a free, effectively unlimited-capacity personal music cloud: a Cloudflare Worker that directly implements the [Subsonic REST API](http://www.subsonic.org/pages/api.jsp). Audio files themselves live in a private Telegram channel (via the official Bot API — no rclone/WebDAV middleman), while metadata lives in Cloudflare D1. Any Subsonic-compatible client (Amperfy, DSub, Ultrasonic, substreamer, ...) can connect directly to browse, play, and manage playlists.
 
-There's no long-running server in this setup — the Worker is invoked per-request, D1 and Telegram are both managed services, and seeking/scrubbing during playback works because the Worker fetches the full file from Telegram and slices the requested byte range itself (Telegram's file CDN doesn't reliably honor Range requests — see the comment in `src/storage/telegram.ts`).
+There's no long-running server in this setup — the Worker is invoked per-request, D1 and Telegram are both managed services, and seeking/scrubbing during playback works because the Worker streams from Telegram and slices on the fly — playback starts from the first chunk, and seek ranges are still sliced by the Worker itself (Telegram's file CDN doesn't reliably honor Range requests — see the comment in `src/storage/telegram.ts`).
 
 **Current limitation**: a single audio file must be under 20MB (a hard limit of the Telegram Bot API's `getFile`); larger files are skipped during import. If larger files (e.g. lossless albums) need to be supported down the line, switching to MTProto/another storage backend would be the way to go.
 
@@ -48,14 +48,14 @@ Cloudflare Worker (src/index.ts — routing + auth + Subsonic response building)
    ↕
 Cloudflare D1 (artists/albums/tracks/playlists metadata)
    ↕ file_ref (JSON: {messageId, fileId})
-Telegram Bot API (sendDocument to upload / getFile + file CDN to download (the CDN doesn't reliably honor Range requests, so the Worker fetches the full file and slices byte ranges itself))
+Telegram Bot API (sendDocument to upload / getFile + file CDN to download (the CDN doesn't reliably honor Range requests, so the Worker streams and slices byte ranges itself))
 ```
 
 The storage layer is an interface (`src/storage/types.ts`) with a Telegram implementation (`src/storage/telegram.ts`) as the source of truth for every file. In front of that sits an optional R2 read-through cache (`src/storage/cached.ts`, see below) — enabled only if you bind an R2 bucket; without it, every request talks to Telegram directly, same as before that cache existed.
 
 ## R2 read-through cache (optional)
 
-By default, every `stream`/`download` request re-fetches the whole file from Telegram (its file CDN doesn't reliably honor Range requests, so the Worker always pulls the full file and slices out the requested bytes itself — see the comment in `src/storage/telegram.ts`). That's fine at low volume, but it means repeated plays or a listener scrubbing the seek bar repeatedly re-download the same file from Telegram, and it leans on Telegram's Bot API rate limits under concurrent listeners.
+By default, every `stream`/`download` request streams from Telegram (its file CDN doesn't reliably honor Range requests, so the Worker slices out the requested bytes itself — see the comment in `src/storage/telegram.ts`). That's fine at low volume, but it means repeated plays or a listener scrubbing the seek bar repeatedly re-download the same file from Telegram, and it leans on Telegram's Bot API rate limits under concurrent listeners.
 
 Binding an R2 bucket turns this into a real cache: the first stream of a file downloads it from Telegram once and writes it to R2; every subsequent request (including Range requests from seeking) is served straight out of R2 — cheaper, faster, and no repeat Telegram calls. This is entirely optional and off by default; nothing else changes if you skip it.
 
