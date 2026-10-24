@@ -8,7 +8,7 @@
 
 把 Telegram 变成免费、无限容量的私人音乐云盘：一个 Cloudflare Worker 直接实现 [Subsonic REST API](http://www.subsonic.org/pages/api.jsp)，音频文件本体存在 Telegram 私有频道里（走官方 Bot API，不依赖 rclone/WebDAV 之类的中间层），元数据存 Cloudflare D1。任何支持 Subsonic 协议的客户端（Amperfy、DSub、Ultrasonic、substreamer……）都能直接连上来听歌、管理歌单。
 
-整个方案没有常驻服务器——Worker 按请求触发，D1 和 Telegram 都是托管服务，播放时 seek/拖进度条的原理是 Worker 从 Telegram 拉取完整文件后自己按 Range 切片返回（Telegram 的文件 CDN 并不可靠地支持 Range 请求——详见 `src/storage/telegram.ts` 里的注释）。
+整个方案没有常驻服务器——Worker 按请求触发，D1 和 Telegram 都是托管服务，播放时 seek/拖进度条的原理是 Worker 从 Telegram 边下边播、边下边切片（播放从第一个 chunk 开始；seek 的 Range 照样 Worker 自己切，Telegram 的文件 CDN 并不可靠地支持 Range 请求——详见 `src/storage/telegram.ts` 里的注释）。
 
 **当前限制**：单个音乐文件不超过 20MB（Telegram Bot API `getFile` 的硬限制），超过的文件导入时会被跳过。以后如果需要支持更大文件（比如无损专辑),再考虑换用 MTProto/其它存储后端。
 
@@ -47,14 +47,14 @@ Cloudflare Worker（src/index.ts，路由 + 鉴权 + 拼 Subsonic 响应）
    ↕
 Cloudflare D1（artists/albums/tracks/playlists 元数据）
    ↕ file_ref (JSON: {messageId, fileId})
-Telegram Bot API（sendDocument 上传 / getFile+文件CDN 下载（CDN 不可靠地支持 Range 请求，Worker 总是拉取完整文件后自己切片））
+Telegram Bot API（sendDocument 上传 / getFile+文件CDN 下载（CDN 不可靠地支持 Range 请求，Worker 边下边播、自己切片））
 ```
 
 存储层是一个接口（`src/storage/types.ts`），Telegram 实现（`src/storage/telegram.ts`）是每个文件的最终来源。前面可以挂一层可选的 R2 缓存（`src/storage/cached.ts`，见下文）——只有绑定了 R2 bucket 才会启用；不绑定的话，每次请求都直接打 Telegram，跟没有这层缓存时完全一样。
 
 ## R2 缓存（可选）
 
-默认情况下，每次 `stream`/`download` 请求都会重新从 Telegram 下载整个文件（Telegram 的文件 CDN 不可靠地支持 Range 请求，所以 Worker 总是拉完整文件后自己切片返回——详见 `src/storage/telegram.ts` 里的注释）。低并发下这没什么问题，但意味着同一首歌被反复播放，或者用户来回拖进度条，都会重复从 Telegram 下载同一个文件，而且会更容易撞到 Telegram Bot API 的限流。
+默认情况下，每次 `stream`/`download` 请求都会从 Telegram 边下边播（Telegram 的文件 CDN 不可靠地支持 Range 请求，所以 Worker 总是自己切片返回——详见 `src/storage/telegram.ts` 里的注释）。低并发下这没什么问题，但意味着同一首歌被反复播放，或者用户来回拖进度条，都会重复从 Telegram 下载同一个文件，而且会更容易撞到 Telegram Bot API 的限流。
 
 绑定一个 R2 bucket 之后，这就变成了真正的缓存：第一次播放某个文件时从 Telegram 下载一次并写入 R2；之后所有请求（包括 seek 产生的 Range 请求）都直接从 R2 读取——更快、更省，也不会重复调用 Telegram。这是完全可选、默认关闭的功能，不启用的话其它行为不受任何影响。
 
