@@ -88,7 +88,7 @@ async function lookupRaw(artist: string, title: string): Promise<LrclibResponse 
 function stripLrcTimestamps(synced: string): string {
   return synced
     .split("\n")
-    .map((line) => line.replace(/^\[\d{2}:\d{2}(?:\.\d{2,3})?\]\s*/, ""))
+    .map((line) => line.replace(/^(?:\[\d{2,}:\d{2}(?:[.:]\d{2,3})?\])+\s*/, ""))
     .join("\n")
     .trim();
 }
@@ -107,16 +107,20 @@ export interface StructuredLyrics {
   lines: { start?: number; value: string }[];
 }
 
+// A line repeated through the song (a chorus) can carry several
+// timestamps, "[00:12.00][01:30.00]text": one entry per timestamp, then all
+// of them in time order.
 function parseLrcLines(lrc: string): { start: number; value: string }[] {
   const lines: { start: number; value: string }[] = [];
   for (const raw of lrc.split("\n")) {
-    const m = raw.match(/^\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]\s*(.*)$/);
+    const m = raw.match(/^((?:\[\d{2,}:\d{2}(?:[.:]\d{2,3})?\])+)\s*(.*)$/);
     if (!m) continue;
-    const [, mm, ss, frac, text] = m;
-    const ms = (Number(mm) * 60 + Number(ss)) * 1000 + (frac ? Number(frac.padEnd(3, "0")) : 0);
-    lines.push({ start: ms, value: text });
+    for (const [, mm, ss, frac] of m[1].matchAll(/\[(\d{2,}):(\d{2})(?:[.:](\d{2,3}))?\]/g)) {
+      const ms = (Number(mm) * 60 + Number(ss)) * 1000 + (frac ? Number(frac.padEnd(3, "0")) : 0);
+      lines.push({ start: ms, value: m[2] });
+    }
   }
-  return lines;
+  return lines.sort((a, b) => a.start - b.start);
 }
 
 // For OpenSubsonic's getLyricsBySongId, which (unlike classic getLyrics) has

@@ -163,11 +163,27 @@ export async function getAlbumList2(
   type: string,
   size: number,
   offset: number,
+  filter: Omit<q.AlbumListFilter, "owner"> = {},
+  folderStyle = false,
 ): Promise<SNode> {
-  const [albums, starred] = await Promise.all([q.listAlbumList2(db, type, size, offset), q.getStarredIds(db, owner)]);
-  return node("albumList2", undefined, {
-    lists: { album: albums.map((al) => albumNode(al, { starredAt: starred.albums.get(al.id) })) },
-  });
+  const [albums, starred] = await Promise.all([
+    q.listAlbumList2(db, type, size, offset, { ...filter, owner }),
+    q.getStarredIds(db, owner),
+  ]);
+  const nodes = albums.map((al) => albumNode(al, { starredAt: starred.albums.get(al.id) }));
+  // Classic getAlbumList lists albums as directories (getMusicDirectory's
+  // "child" shape): same fields, plus the ones that call them directories.
+  if (folderStyle) {
+    return node("albumList", undefined, {
+      lists: {
+        album: nodes.map((n, i) => ({
+          ...n,
+          attrs: { ...n.attrs, parent: albums[i].artist_id, isDir: true, title: albums[i].name, album: albums[i].name },
+        })),
+      },
+    });
+  }
+  return node("albumList2", undefined, { lists: { album: nodes } });
 }
 
 export async function getGenres(db: D1Database): Promise<SNode> {

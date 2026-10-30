@@ -92,7 +92,7 @@ npm run db:migrate:remote
 
 ## 已实现的端点
 
-`ping` `getLicense` `getMusicFolders` `getIndexes` `getMusicDirectory` `getArtists` `getArtist` `getAlbum` `getSong` `getAlbumList2` `getGenres` `search3` `stream` `download` `getCoverArt` `getPlaylists` `getPlaylist` `createPlaylist` `updatePlaylist` `deletePlaylist` `getRandomSongs` `scrobble` `star` `unstar` `getStarred` `getStarred2` `setRating` `getLyrics` `getOpenSubsonicExtensions` `getLyricsBySongId` `getPlayQueue` `savePlayQueue` `getArtistInfo` `getArtistInfo2` `getTopSongs` `getSimilarSongs2`
+`ping` `getLicense` `getMusicFolders` `getIndexes` `getMusicDirectory` `getArtists` `getArtist` `getAlbum` `getSong` `getAlbumList` `getAlbumList2` `getGenres` `getSongsByGenre` `search3` `stream` `download` `getCoverArt` `getPlaylists` `getPlaylist` `createPlaylist` `updatePlaylist` `deletePlaylist` `getRandomSongs` `scrobble` `star` `unstar` `getStarred` `getStarred2` `setRating` `getLyrics` `getOpenSubsonicExtensions` `getLyricsBySongId` `getPlayQueue` `savePlayQueue` `getArtistInfo` `getArtistInfo2` `getTopSongs` `getSimilarSongs2` `getUser` `getScanStatus` `startScan`
 
 `scrobble`（`submission=true`，默认值）会给对应 track 的 `play_count` 加一、更新 `last_played`；`submission=false`（"正在播放"通知）目前直接忽略，不做处理。`star`/`unstar` 接受 `id`（曲目）/`albumId`/`artistId` 中的任意组合；`getStarred`/`getStarred2` 返回同一份收藏数据，只是外层标签不同（`starred` vs `starred2`），走的都是这个项目原生的 ID3 结构。`setRating` 给曲目打 1–5 星的 `userRating`（`rating=0` 清除评分）；评分只针对单曲，没有专辑/艺人维度的评分。
 

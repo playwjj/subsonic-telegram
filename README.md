@@ -93,7 +93,7 @@ Redeploy and the cache is live. There's no size limit on the library itself — 
 
 ## Implemented endpoints
 
-`ping` `getLicense` `getMusicFolders` `getIndexes` `getMusicDirectory` `getArtists` `getArtist` `getAlbum` `getSong` `getAlbumList2` `getGenres` `search3` `stream` `download` `getCoverArt` `getPlaylists` `getPlaylist` `createPlaylist` `updatePlaylist` `deletePlaylist` `getRandomSongs` `scrobble` `star` `unstar` `getStarred` `getStarred2` `setRating` `getLyrics` `getOpenSubsonicExtensions` `getLyricsBySongId` `getPlayQueue` `savePlayQueue` `getArtistInfo` `getArtistInfo2` `getTopSongs` `getSimilarSongs2`
+`ping` `getLicense` `getMusicFolders` `getIndexes` `getMusicDirectory` `getArtists` `getArtist` `getAlbum` `getSong` `getAlbumList` `getAlbumList2` `getGenres` `getSongsByGenre` `search3` `stream` `download` `getCoverArt` `getPlaylists` `getPlaylist` `createPlaylist` `updatePlaylist` `deletePlaylist` `getRandomSongs` `scrobble` `star` `unstar` `getStarred` `getStarred2` `setRating` `getLyrics` `getOpenSubsonicExtensions` `getLyricsBySongId` `getPlayQueue` `savePlayQueue` `getArtistInfo` `getArtistInfo2` `getTopSongs` `getSimilarSongs2` `getUser` `getScanStatus` `startScan`
 
 `scrobble` (`submission=true`, the default) increments the track's `play_count` and updates `last_played`; `submission=false` ("now playing" notifications) is currently ignored outright. `star`/`unstar` accept any combination of `id` (track) / `albumId` / `artistId`. `getStarred`/`getStarred2` return the same favorites data, just under a different top-level tag (`starred` vs `starred2`) — both use this project's native ID3 structure. `setRating` sets a track's 1–5 star `userRating` (`rating=0` clears it); ratings are per-track only, no album/artist rating.
 

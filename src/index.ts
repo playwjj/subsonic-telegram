@@ -58,6 +58,19 @@ function jsonParam<T extends unknown[]>(params: URLSearchParams, key: string): T
   throw new metadata.MetadataError(`Invalid ${key}`);
 }
 
+// A whole-number param, or `fallback` when absent or not a number — a bad
+// value would otherwise reach D1 as NaN and fail the whole query.
+function intParam(params: URLSearchParams, key: string, fallback: number, max = Infinity): number {
+  const value = Number(params.get(key) ?? undefined);
+  return Number.isFinite(value) ? Math.max(0, Math.min(Math.floor(value), max)) : fallback;
+}
+
+// An optional whole-number param (fromYear, toYear, ...).
+function optionalIntParam(params: URLSearchParams, key: string): number | undefined {
+  const value = Number(params.get(key) || undefined);
+  return Number.isFinite(value) ? Math.floor(value) : undefined;
+}
+
 // uploadTrack's optional "folder" param (may have several segments).
 function sanitizeFolderPath(input: string): string {
   return input
@@ -239,20 +252,79 @@ export default {
         return respond(subsonicSuccess(songNode(track, { starredAt })), format);
       }
 
+      case "getAlbumList":
       case "getAlbumList2": {
         const type = params.get("type") ?? "newest";
-        const size = Math.min(Number(params.get("size") ?? 20), 500);
-        const offset = Number(params.get("offset") ?? 0);
-        return respond(subsonicSuccess(await browsing.getAlbumList2(env.DB, auth.username, type, size, offset)), format);
+        if (type === "byGenre" && !params.get("genre")) return respond(subsonicError(ERR.MISSING_PARAM, "Missing genre"), format);
+        const result = await browsing.getAlbumList2(
+          env.DB,
+          auth.username,
+          type,
+          intParam(params, "size", 10, 500),
+          intParam(params, "offset", 0),
+          { genre: params.get("genre") ?? undefined, fromYear: optionalIntParam(params, "fromYear"), toYear: optionalIntParam(params, "toYear") },
+          endpoint === "getAlbumList",
+        );
+        return respond(subsonicSuccess(result), format);
+      }
+
+      case "getSongsByGenre": {
+        const genre = params.get("genre");
+        if (!genre) return respond(subsonicError(ERR.MISSING_PARAM, "Missing genre"), format);
+        const [tracks, starred] = await Promise.all([
+          q.listTracksByGenre(env.DB, genre, intParam(params, "count", 10, 500), intParam(params, "offset", 0)),
+          q.getStarredIds(env.DB, auth.username),
+        ]);
+        return respond(
+          subsonicSuccess(
+            node("songsByGenre", undefined, {
+              lists: { song: tracks.map((t) => songNode(t, { starredAt: starred.tracks.get(t.id) })) },
+            }),
+          ),
+          format,
+        );
+      }
+
+      // Single-user server: the one account may do everything this server
+      // supports. Clients (DSub, Ultrasonic, ...) check these roles to decide
+      // which features to offer.
+      case "getUser":
+        return respond(
+          subsonicSuccess(
+            node("user", {
+              username: auth.username,
+              scrobblingEnabled: true,
+              adminRole: true,
+              settingsRole: false,
+              downloadRole: true,
+              uploadRole: true,
+              playlistRole: true,
+              coverArtRole: true,
+              commentRole: false,
+              podcastRole: false,
+              streamRole: true,
+              jukeboxRole: false,
+              shareRole: false,
+            }),
+          ),
+          format,
+        );
+
+      // Nothing to scan: the library is D1, updated as files are added.
+      case "getScanStatus":
+      case "startScan": {
+        const stats = await q.getLibraryStats(env.DB);
+        return respond(subsonicSuccess(node("scanStatus", { scanning: false, count: stats.song_count })), format);
       }
 
       case "search3": {
-        const query = params.get("query") ?? "";
-        const artistCount = Number(params.get("artistCount") ?? 20);
-        const albumCount = Number(params.get("albumCount") ?? 20);
-        const songCount = Number(params.get("songCount") ?? 20);
+        const query = (params.get("query") ?? "").replace(/^"(.*)"$/, "$1").trim();
+        const page = (kind: string) => ({
+          count: intParam(params, `${kind}Count`, 20, 500),
+          offset: intParam(params, `${kind}Offset`, 0),
+        });
         const [results, starred] = await Promise.all([
-          q.search3(env.DB, query, artistCount, albumCount, songCount),
+          q.search3(env.DB, query, { artists: page("artist"), albums: page("album"), songs: page("song") }),
           q.getStarredIds(env.DB, auth.username),
         ]);
         return respond(
@@ -402,12 +474,10 @@ export default {
       }
 
       case "getRandomSongs": {
-        const size = Math.min(Number(params.get("size") ?? 10), 500);
+        const size = intParam(params, "size", 10, 500);
         const genre = params.get("genre") ?? undefined;
-        const fromYearParam = params.get("fromYear");
-        const toYearParam = params.get("toYear");
-        const fromYear = fromYearParam ? Number(fromYearParam) : undefined;
-        const toYear = toYearParam ? Number(toYearParam) : undefined;
+        const fromYear = optionalIntParam(params, "fromYear");
+        const toYear = optionalIntParam(params, "toYear");
 
         const favoriteQuota = Math.round(size * RANDOM_SONGS_FAVORITE_RATIO);
         const favorites = favoriteQuota
@@ -451,7 +521,7 @@ export default {
       case "getTopSongs": {
         const artist = params.get("artist");
         if (!artist) return respond(subsonicError(ERR.MISSING_PARAM, "Missing artist"), format);
-        const count = Math.min(Number(params.get("count") ?? 50), 500);
+        const count = intParam(params, "count", 50, 500);
         const tracks = await q.getTopSongsByArtistName(env.DB, artist, count);
         const starred = await q.getStarredIds(env.DB, auth.username);
         return respond(
@@ -471,7 +541,7 @@ export default {
       case "getSimilarSongs2": {
         const artistId = params.get("id");
         if (!artistId) return respond(subsonicError(ERR.MISSING_PARAM, "Missing id"), format);
-        const count = Math.min(Number(params.get("count") ?? 50), 500);
+        const count = intParam(params, "count", 50, 500);
 
         const artistQuota = Math.round(count * SIMILAR_SONGS_ARTIST_RATIO);
         const fromArtist = artistQuota ? await q.getRandomTracksByArtist(env.DB, artistId, artistQuota) : [];
@@ -512,11 +582,14 @@ export default {
         const submission = params.get("submission");
         if (submission !== "false") {
           const times = params.getAll("time");
-          for (let i = 0; i < ids.length; i++) {
-            const timeMs = Number(times[i]);
-            const playedAt = Number.isFinite(timeMs) && times[i] ? Math.floor(timeMs / 1000) : Math.floor(Date.now() / 1000);
-            await q.scrobble(env.DB, ids[i], playedAt);
-          }
+          await q.scrobble(
+            env.DB,
+            ids.map((trackId, i) => {
+              const timeMs = Number(times[i]);
+              const playedAt = Number.isFinite(timeMs) && times[i] ? Math.floor(timeMs / 1000) : Math.floor(Date.now() / 1000);
+              return { trackId, playedAt };
+            }),
+          );
         }
         return respond(subsonicSuccess(), format);
       }
@@ -562,10 +635,12 @@ export default {
 
       case "star":
       case "unstar": {
-        const fn = endpoint === "star" ? q.starItem : q.unstarItem;
-        for (const id of params.getAll("id")) await fn(env.DB, auth.username, "track", id);
-        for (const id of params.getAll("albumId")) await fn(env.DB, auth.username, "album", id);
-        for (const id of params.getAll("artistId")) await fn(env.DB, auth.username, "artist", id);
+        const items = [
+          ...params.getAll("id").map((id) => ({ type: "track" as const, id })),
+          ...params.getAll("albumId").map((id) => ({ type: "album" as const, id })),
+          ...params.getAll("artistId").map((id) => ({ type: "artist" as const, id })),
+        ];
+        await q.setStarred(env.DB, auth.username, items, endpoint === "star");
         return respond(subsonicSuccess(), format);
       }
 
@@ -613,8 +688,8 @@ export default {
       }
 
       case "getSongs": {
-        const size = Math.min(Number(params.get("size") ?? 50), 500);
-        const offset = Number(params.get("offset") ?? 0);
+        const size = intParam(params, "size", 50, 500);
+        const offset = intParam(params, "offset", 0);
         const sort = params.get("sort") ?? "title";
         const [{ tracks, total }, starred] = await Promise.all([
           q.listAllTracks(env.DB, { limit: size, offset, sort }),
@@ -630,7 +705,7 @@ export default {
 
       case "getRecentlyPlayed":
       case "getMostPlayed": {
-        const size = Math.min(Number(params.get("size") ?? 20), 500);
+        const size = intParam(params, "size", 20, 500);
         const [tracks, starred] = await Promise.all([
           endpoint === "getRecentlyPlayed" ? q.getRecentlyPlayed(env.DB, size) : q.getMostPlayed(env.DB, size),
           q.getStarredIds(env.DB, auth.username),
@@ -650,7 +725,7 @@ export default {
       // library, one artist (artistId), or a folder including its subfolders
       // (path) — capped like the other list endpoints.
       case "getShuffleSongs": {
-        const size = Math.min(Number(params.get("size") ?? 500), 500);
+        const size = intParam(params, "size", 500, 500);
         const artistId = params.get("artistId");
         const path = params.get("path");
         const [tracks, starred] = await Promise.all([
@@ -708,7 +783,7 @@ export default {
       // Everything under a folder (subfolders included) in path order, or
       // just what matches `query` — "play this folder" and in-folder search.
       case "getFolderSongs": {
-        const size = Math.min(Number(params.get("size") ?? 500), 500);
+        const size = intParam(params, "size", 500, 500);
         const [tracks, starred] = await Promise.all([
           q.listTracksUnderPath(env.DB, params.get("path") ?? "", { query: params.get("query") || undefined, limit: size }),
           q.getStarredIds(env.DB, auth.username),

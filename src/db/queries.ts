@@ -199,7 +199,62 @@ const ALBUM_LIST_ORDER: Record<string, [string, string, string]> = {
     "p.artist_name COLLATE NOCASE",
   ],
   byYear: [ALBUMS_THEN_ARTISTS, "al.year", "p.year"],
+  // The rest also narrow the albums (see albumListWhere). Played/rated ones
+  // order by their tracks' stats: per album in the page pick, and again
+  // over the page from the outer query's join with tracks.
+  starred: [ALBUMS_THEN_ARTISTS, "al.name COLLATE NOCASE", "p.name COLLATE NOCASE"],
+  byGenre: [ALBUMS_THEN_ARTISTS, "al.name COLLATE NOCASE", "p.name COLLATE NOCASE"],
+  frequent: [
+    ALBUMS_THEN_ARTISTS,
+    "(SELECT SUM(play_count) FROM tracks WHERE album_id = al.id) DESC",
+    "SUM(t.play_count) DESC",
+  ],
+  recent: [
+    ALBUMS_THEN_ARTISTS,
+    "(SELECT MAX(last_played) FROM tracks WHERE album_id = al.id) DESC",
+    "MAX(t.last_played) DESC",
+  ],
+  highest: [
+    ALBUMS_THEN_ARTISTS,
+    "(SELECT AVG(rating) FROM tracks WHERE album_id = al.id AND rating > 0) DESC",
+    "AVG(NULLIF(t.rating, 0)) DESC",
+  ],
 };
+
+export interface AlbumListFilter {
+  owner?: string; // starred
+  genre?: string; // byGenre
+  fromYear?: number; // byYear
+  toYear?: number;
+}
+
+// The WHERE clause (and its params) for list types that only show some
+// albums. Played/rated ones are found off the tracks' indexes first.
+function albumListWhere(type: string, filter: AlbumListFilter): [string, unknown[]] {
+  switch (type) {
+    case "starred":
+      return [`WHERE al.id IN (SELECT item_id FROM starred WHERE owner = ? AND item_type = 'album')`, [filter.owner ?? ""]];
+    case "byGenre":
+      // Like getGenres: an album counts under every genre one of its songs has.
+      return [
+        `WHERE al.genre = ? OR al.id IN (SELECT album_id FROM tracks WHERE track_genre = ?)`,
+        [filter.genre ?? "", filter.genre ?? ""],
+      ];
+    case "frequent":
+      return [`WHERE al.id IN (SELECT album_id FROM tracks WHERE play_count > 0)`, []];
+    case "recent":
+      return [`WHERE al.id IN (SELECT album_id FROM tracks WHERE last_played IS NOT NULL)`, []];
+    case "highest":
+      return [`WHERE al.id IN (SELECT album_id FROM tracks WHERE rating > 0)`, []];
+    case "byYear": {
+      const years = [filter.fromYear, filter.toYear].filter((y): y is number => y !== undefined);
+      if (!years.length) return ["", []];
+      return [`WHERE al.year BETWEEN ? AND ?`, [Math.min(...years), Math.max(...years)]];
+    }
+    default:
+      return ["", []];
+  }
+}
 
 function albumPage(db: D1Database, from: string, where: string, order: string, outerOrder: string) {
   return db.prepare(
@@ -218,6 +273,7 @@ export async function listAlbumList2(
   type: string,
   size: number,
   offset: number,
+  filter: AlbumListFilter = {},
 ): Promise<AlbumRow[]> {
   if (type === "random") {
     const fetch = async (rowids: string) =>
@@ -231,9 +287,14 @@ export async function listAlbumList2(
       .all<AlbumRow>();
     return shuffled(results);
   }
-  const [from, pageOrder, order] = ALBUM_LIST_ORDER[type] ?? ALBUM_LIST_ORDER.newest;
-  const { results } = await albumPage(db, from, "", `ORDER BY ${pageOrder} LIMIT ? OFFSET ?`, `ORDER BY ${order}`)
-    .bind(size, offset)
+  let [from, pageOrder, order] = ALBUM_LIST_ORDER[type] ?? ALBUM_LIST_ORDER.newest;
+  // byYear with fromYear after toYear lists newest years first (per spec).
+  if (type === "byYear" && filter.fromYear !== undefined && filter.toYear !== undefined && filter.fromYear > filter.toYear) {
+    [pageOrder, order] = [`${pageOrder} DESC`, `${order} DESC`];
+  }
+  const [where, params] = albumListWhere(type, filter);
+  const { results } = await albumPage(db, from, where, `ORDER BY ${pageOrder} LIMIT ? OFFSET ?`, `ORDER BY ${order}`)
+    .bind(...params, size, offset)
     .all<AlbumRow>();
   return results;
 }
@@ -244,27 +305,44 @@ export interface Search3Result {
   songs: TrackRow[];
 }
 
+export interface SearchPage {
+  count: number;
+  offset: number;
+}
+
+// Clients page through results with the offsets — and some sync the whole
+// library that way, with an empty query (which matches everything here).
+// "%" and "_" in the query are matched literally.
 export async function search3(
   db: D1Database,
   query: string,
-  artistCount: number,
-  albumCount: number,
-  songCount: number,
+  pages: { artists: SearchPage; albums: SearchPage; songs: SearchPage },
 ): Promise<Search3Result> {
-  const like = `%${query}%`;
-  const artists = await db
-    .prepare(`${ARTIST_SELECT} WHERE a.name LIKE ? GROUP BY a.id LIMIT ?`)
-    .bind(like, artistCount)
-    .all<ArtistRow>();
-  const albums = await db
-    .prepare(`${ALBUM_SELECT} WHERE al.name LIKE ? GROUP BY al.id LIMIT ?`)
-    .bind(like, albumCount)
-    .all<AlbumRow>();
-  const songs = await db
-    .prepare(`${TRACK_SELECT} WHERE t.title LIKE ? LIMIT ?`)
-    .bind(like, songCount)
-    .all<TrackRow>();
+  const like = `%${query.replace(/[\\%_]/g, "\\$&")}%`;
+  const [artists, albums, songs] = await Promise.all([
+    db
+      .prepare(`${ARTIST_SELECT} WHERE a.name LIKE ? ESCAPE '\\' GROUP BY a.id LIMIT ? OFFSET ?`)
+      .bind(like, pages.artists.count, pages.artists.offset)
+      .all<ArtistRow>(),
+    db
+      .prepare(`${ALBUM_SELECT} WHERE al.name LIKE ? ESCAPE '\\' GROUP BY al.id LIMIT ? OFFSET ?`)
+      .bind(like, pages.albums.count, pages.albums.offset)
+      .all<AlbumRow>(),
+    db
+      .prepare(`${TRACK_SELECT} WHERE t.title LIKE ? ESCAPE '\\' ORDER BY t.rowid LIMIT ? OFFSET ?`)
+      .bind(like, pages.songs.count, pages.songs.offset)
+      .all<TrackRow>(),
+  ]);
   return { artists: artists.results, albums: albums.results, songs: songs.results };
+}
+
+// getSongsByGenre: a song's own genre, else its album's (TRACK_GENRE).
+export async function listTracksByGenre(db: D1Database, genre: string, limit: number, offset: number): Promise<TrackRow[]> {
+  const { results } = await db
+    .prepare(`${TRACK_SELECT} WHERE ${TRACK_GENRE} = ? ORDER BY t.rowid LIMIT ? OFFSET ?`)
+    .bind(genre, limit, offset)
+    .all<TrackRow>();
+  return results;
 }
 
 export async function getTrackBySourcePath(db: D1Database, sourcePath: string): Promise<TrackRow | null> {
@@ -490,11 +568,16 @@ export async function getRandomRecentTracks(
   return results;
 }
 
-export async function scrobble(db: D1Database, trackId: string, playedAt: number): Promise<void> {
-  await db
-    .prepare(`UPDATE tracks SET play_count = play_count + 1, last_played = ? WHERE id = ?`)
-    .bind(playedAt, trackId)
-    .run();
+// One batch for all of them: offline clients submit a backlog at once.
+export async function scrobble(db: D1Database, plays: { trackId: string; playedAt: number }[]): Promise<void> {
+  if (!plays.length) return;
+  await db.batch(
+    plays.map((p) =>
+      db
+        .prepare(`UPDATE tracks SET play_count = play_count + 1, last_played = MAX(COALESCE(last_played, 0), ?) WHERE id = ?`)
+        .bind(p.playedAt, p.trackId),
+    ),
+  );
 }
 
 export async function setRating(db: D1Database, trackId: string, rating: number): Promise<void> {
@@ -503,32 +586,29 @@ export async function setRating(db: D1Database, trackId: string, rating: number)
 
 export type StarredItemType = "artist" | "album" | "track";
 
-export async function starItem(
-  db: D1Database,
-  owner: string,
-  itemType: StarredItemType,
-  itemId: string,
-): Promise<void> {
+export interface StarTarget {
+  type: StarredItemType;
+  id: string;
+}
+
+export async function setStarred(db: D1Database, owner: string, items: StarTarget[], starred: boolean): Promise<void> {
+  if (!items.length) return;
+  const now = Math.floor(Date.now() / 1000);
   // INSERT OR IGNORE (rather than ON CONFLICT(...) DO NOTHING) doesn't need
   // to name the exact constraint it's deduplicating against, so it still
   // works if the deployed starred table predates the composite primary key
   // in db/schema.sql.
-  await db
-    .prepare(`INSERT OR IGNORE INTO starred (owner, item_type, item_id, starred_at) VALUES (?, ?, ?, ?)`)
-    .bind(owner, itemType, itemId, Math.floor(Date.now() / 1000))
-    .run();
-}
-
-export async function unstarItem(
-  db: D1Database,
-  owner: string,
-  itemType: StarredItemType,
-  itemId: string,
-): Promise<void> {
-  await db
-    .prepare(`DELETE FROM starred WHERE owner = ? AND item_type = ? AND item_id = ?`)
-    .bind(owner, itemType, itemId)
-    .run();
+  await db.batch(
+    items.map((item) =>
+      starred
+        ? db
+            .prepare(`INSERT OR IGNORE INTO starred (owner, item_type, item_id, starred_at) VALUES (?, ?, ?, ?)`)
+            .bind(owner, item.type, item.id, now)
+        : db
+            .prepare(`DELETE FROM starred WHERE owner = ? AND item_type = ? AND item_id = ?`)
+            .bind(owner, item.type, item.id),
+    ),
+  );
 }
 
 // One owner's whole starred set, keyed by item type — cheap enough (one
