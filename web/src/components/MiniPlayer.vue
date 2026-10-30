@@ -11,7 +11,7 @@ const dashOffset = computed(() => {
 });
 
 const cover = computed(() =>
-  currentTrack.value?.coverArt ? coverArtUrl(currentTrack.value.coverArt) : "/music-cover.jpg",
+  currentTrack.value?.coverArt ? coverArtUrl(currentTrack.value.coverArt, 300) : "/music-cover.jpg",
 );
 </script>
 

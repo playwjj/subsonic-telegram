@@ -19,4 +19,7 @@ export interface Env {
   // Workers AI, for reading artist/title out of messy file names (see
   // src/subsonic/fileNames.ts). Optional: without it that just isn't offered.
   AI?: Ai;
+  // Images binding, for serving covers at the size they're shown (see
+  // src/storage/thumbnails.ts). Optional: without it covers are full size.
+  IMAGES?: ImagesBinding;
 }

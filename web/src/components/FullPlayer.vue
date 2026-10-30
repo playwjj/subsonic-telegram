@@ -21,7 +21,7 @@ const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ queue: [] }>();
 
 const cover = computed(() =>
-  currentTrack.value?.coverArt ? coverArtUrl(currentTrack.value.coverArt) : "/music-cover.jpg",
+  currentTrack.value?.coverArt ? coverArtUrl(currentTrack.value.coverArt, 600) : "/music-cover.jpg",
 );
 const starred = computed(() => !!currentTrack.value?.starred);
 const repeatTitle = computed(

@@ -122,7 +122,7 @@ onMounted(() => {
             :to="{ name: 'album', params: { id: al.id } }"
             class="album-card glass p-2 transition-transform hover:scale-[1.03]"
           >
-            <img v-if="al.coverArt" :src="coverArtUrl(al.coverArt)" :alt="al.name" />
+            <img v-if="al.coverArt" :src="coverArtUrl(al.coverArt, 300)" :alt="al.name" />
             <div class="title">{{ al.name }}</div>
           </RouterLink>
         </div>

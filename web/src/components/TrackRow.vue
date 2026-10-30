@@ -48,7 +48,7 @@ function formatDuration(sec?: number): string {
       <img
         v-if="song.coverArt"
         class="cover"
-        :src="coverArtUrl(song.coverArt)"
+        :src="coverArtUrl(song.coverArt, 300)"
         :alt="`${song.album} cover`"
         @error="($event.target as HTMLImageElement).style.display = 'none'"
       />

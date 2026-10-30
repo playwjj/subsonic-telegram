@@ -452,7 +452,7 @@ function updateMediaSessionMetadata(track: Song): void {
     title: track.title,
     artist: track.artist,
     album: track.album,
-    artwork: track.coverArt ? [{ src: coverArtUrl(track.coverArt) }] : [],
+    artwork: track.coverArt ? [{ src: coverArtUrl(track.coverArt, 600) }] : [],
   });
 }
 

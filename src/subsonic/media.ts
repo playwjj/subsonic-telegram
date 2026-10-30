@@ -1,6 +1,7 @@
 import * as q from "../db/queries";
 import type { StorageBackend } from "../storage/types";
 import { cacheKey } from "../storage/cached";
+import { thumbnail, thumbWidth } from "../storage/thumbnails";
 
 export async function streamTrack(
   db: D1Database,
@@ -48,6 +49,9 @@ export async function getCoverArt(
   assets: Fetcher,
   id: string,
   ifNoneMatch: string | null,
+  // Resizing to `size` (see src/storage/thumbnails.ts) needs the Images
+  // binding; without it, every size gets the original.
+  resize: { size: string | null; images?: ImagesBinding; bucket?: R2Bucket; ctx: ExecutionContext },
 ): Promise<Response> {
   const placeholder = async () =>
     withHeaders(await assets.fetch(new Request("https://subsonic-telegram.invalid/music-cover.jpg")), {
@@ -60,11 +64,17 @@ export async function getCoverArt(
     album?.cover_ref ?? (await q.getTrack(db, id))?.cover_ref ?? (album ? null : await q.getArtistCoverRef(db, id));
   if (!coverRef) return placeholder();
 
-  const etag = `"${(await cacheKey(coverRef)).slice(0, 24)}"`;
+  const key = await cacheKey(coverRef);
+  const width = resize.images ? thumbWidth(resize.size) : null;
+  const etag = `"${key.slice(0, 24)}${width ? `-${width}` : ""}"`;
   if (ifNoneMatch && ifNoneMatch.split(",").some((tag) => tag.trim().replace(/^W\//, "") === etag)) {
     return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": COVER_CACHE } });
   }
-  const response = await storage.getFileResponse(coverRef, null);
-  if (!response.ok) return placeholder();
+  const original = () => storage.getFileResponse(coverRef, null);
+  const response =
+    width && resize.images
+      ? await thumbnail(resize.images, resize.bucket, resize.ctx, key, width, original)
+      : await original();
+  if (!response?.ok) return placeholder();
   return withHeaders(response, { ETag: etag, "Cache-Control": COVER_CACHE });
 }

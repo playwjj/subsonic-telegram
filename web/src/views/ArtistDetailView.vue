@@ -44,7 +44,7 @@ async function onPhotoPicked(e: Event) {
 <template>
   <div v-if="artist" class="artist-detail">
     <div class="artist-header">
-      <img v-if="artist.coverArt" :src="coverArtUrl(artist.coverArt)" :alt="`${artist.name} cover`" />
+      <img v-if="artist.coverArt" :src="coverArtUrl(artist.coverArt, 600)" :alt="`${artist.name} cover`" />
       <h1>{{ artist.name }}</h1>
       <ShuffleButton class="ml-auto text-sm" :load="() => getShuffleSongs({ artistId: artist!.id })" />
       <button class="inline-flex items-center gap-2 text-sm" :disabled="uploadingPhoto" @click="photoInput?.click()">
@@ -60,7 +60,7 @@ async function onPhotoPicked(e: Event) {
         :to="{ name: 'album', params: { id: al.id } }"
         class="album-card glass p-2 transition-transform hover:scale-[1.03]"
       >
-        <img v-if="al.coverArt" :src="coverArtUrl(al.coverArt)" :alt="al.name" />
+        <img v-if="al.coverArt" :src="coverArtUrl(al.coverArt, 300)" :alt="al.name" />
         <div v-else class="cover-placeholder" />
         <div class="title">{{ al.name }}</div>
         <div class="meta">{{ al.year ?? "" }}</div>

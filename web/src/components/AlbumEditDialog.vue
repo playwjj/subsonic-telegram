@@ -40,7 +40,7 @@ const hasCover = computed(() => (cover.value === undefined ? !!props.album.cover
 const shownCover = computed(() => {
   if (cover.value instanceof Blob) return previewUrl.value;
   if (typeof cover.value === "string") return remotePreview.value ?? cover.value;
-  return cover.value === null || !props.album.coverArt ? null : coverArtUrl(props.album.coverArt);
+  return cover.value === null || !props.album.coverArt ? null : coverArtUrl(props.album.coverArt, 600);
 });
 const fileInput = ref<HTMLInputElement | null>(null);
 

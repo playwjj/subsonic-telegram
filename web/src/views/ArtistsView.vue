@@ -28,7 +28,7 @@ onMounted(async () => {
       <ul>
         <li v-for="a in group.artist" :key="a.id">
           <RouterLink :to="{ name: 'artist', params: { id: a.id } }" class="artist-link">
-            <img v-if="a.coverArt" :src="coverArtUrl(a.coverArt)" :alt="`${a.name} cover`" />
+            <img v-if="a.coverArt" :src="coverArtUrl(a.coverArt, 300)" :alt="`${a.name} cover`" />
             <span>{{ a.name }}</span>
           </RouterLink>
           <span class="count">{{ a.albumCount }}</span>

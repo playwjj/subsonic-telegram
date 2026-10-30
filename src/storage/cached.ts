@@ -1,6 +1,7 @@
 import type { DeleteFilesResult, FileCheck, OpenedFile, SourceStorage, StorageBackend } from "./types";
 import { parseRange, rangeHeaders, rangeNotSatisfiable, rangeResponse } from "./range";
 import * as cache from "../db/cache";
+import { thumbKeys } from "./thumbnails";
 
 // Optional read-through cache in front of a SourceStorage (Telegram). Only
 // ever constructed when the CACHE_BUCKET binding is present (see
@@ -37,9 +38,10 @@ export class CachedStorage implements StorageBackend {
     // Best-effort, same tolerance TelegramStorage.deleteFile already applies
     // to the Telegram side -- a stale cache entry left behind after this
     // just gets served until it ages out of the LRU eviction below.
+    // A cover's resized copies (thumbnails.ts) go with it.
     this.ctx.waitUntil(
       this.bucket
-        .delete(key)
+        .delete([key, ...thumbKeys(key)])
         .then(() => cache.deleteCacheEntry(this.db, key))
         .catch((err) => console.warn(`Cache cleanup failed for deleted file: ${err}`)),
     );
@@ -48,9 +50,11 @@ export class CachedStorage implements StorageBackend {
   async deleteFiles(refs: string[]): Promise<DeleteFilesResult> {
     const result = await this.source.deleteFiles(refs);
     const keys = await Promise.all(refs.map(cacheKey));
-    // R2's bulk delete takes up to 1000 keys per call.
+    // R2's bulk delete takes up to 1000 keys per call. A cover's resized
+    // copies (thumbnails.ts) go with it.
+    const objects = keys.flatMap((key) => [key, ...thumbKeys(key)]);
     const chunks: string[][] = [];
-    for (let i = 0; i < keys.length; i += 1000) chunks.push(keys.slice(i, i + 1000));
+    for (let i = 0; i < objects.length; i += 1000) chunks.push(objects.slice(i, i + 1000));
     this.ctx.waitUntil(
       Promise.all(chunks.map((chunk) => this.bucket.delete(chunk)))
         .then(() => cache.deleteCacheEntries(this.db, keys))

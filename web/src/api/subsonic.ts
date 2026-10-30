@@ -127,8 +127,13 @@ export function downloadUrl(id: string): string {
 // it reloads instead of keeping the image it already has for that URL.
 const coverVersions = reactive<Record<string, number>>({});
 
-export function coverArtUrl(id: string): string {
-  return buildUrl("getCoverArt", { id, v: coverVersions[id] });
+// The server resizes covers to the size asked for (300 or 600: it snaps
+// to those), so lists don't download full-size art. 300 covers anything up
+// to ~150 CSS px on a 2x screen; 600 is for the big ones.
+export type CoverSize = 300 | 600;
+
+export function coverArtUrl(id: string, size: CoverSize): string {
+  return buildUrl("getCoverArt", { id, size, v: coverVersions[id] });
 }
 
 export async function login(username: string, password: string): Promise<void> {

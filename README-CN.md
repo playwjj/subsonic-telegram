@@ -110,7 +110,7 @@ npm run db:migrate:remote
 
 **艺人图片**：每个艺人的 `coverArt` 就是它自己的 id，`getCoverArt` 收到艺人 id 时返回这个艺人的照片（`artists.cover_ref`，由 `npm run fix-covers -- --artist-photos` 填充，见下），没有照片就依次退回到他某张专辑的封面（新的优先）、任意一首歌的单曲封面，最后才是占位图。`getArtistInfo`/`getArtistInfo2` 只返回 `smallImageUrl`/`mediumImageUrl`/`largeImageUrl`（没有简介和相似艺人——真正的服务端这些都来自 Last.fm）；客户端会把这些当普通图片地址直接加载、不会自己补上鉴权参数，所以链接指向 `getCoverArt`，并原样带上调用方自己的鉴权参数。`artists.cover_ref` 加入之前建的数据库需要执行一次 `ALTER TABLE artists ADD COLUMN cover_ref TEXT;`（见 `db/schema.sql`）。
 
-**封面缓存**：`getCoverArt` 的响应带 `Cache-Control: private, max-age=86400, stale-while-revalidate=2592000`，以及根据封面文件引用算出来的 `ETag`。客户端一天内直接用缓存，之后在后台重新验证——封面没变的话只花一次 D1 查询、返回 304，不用再去 Telegram 取。占位图只缓存 5 分钟，这样新加的封面很快就能显示出来。`size` 参数会被忽略（封面按原样返回）。
+**封面缓存**：`getCoverArt` 的响应带 `Cache-Control: private, max-age=86400, stale-while-revalidate=2592000`，以及根据封面文件引用算出来的 `ETag`。客户端一天内直接用缓存，之后在后台重新验证——封面没变的话只花一次 D1 查询、返回 304，不用再去 Telegram 取。占位图只缓存 5 分钟，这样新加的封面很快就能显示出来。**封面尺寸**：在 `wrangler.toml` 里绑定了 `IMAGES`（Images）后，`getCoverArt` 会处理 `size` 参数——向上取整到 300 或 600 像素，以 WebP 返回（约 1 MB 的内嵌 PNG 在 300 下只有约 15 KB）；更大或不带 `size` 时返回原图。每张封面每个尺寸只缩放一次，结果存在 R2 缓存桶的 `thumb/` 下（随封面一起删除）；网页列表里请求 300，大图界面请求 600。Cloudflare 免费额度是每月 5,000 次不同的缩放，超出后该封面先按原图返回，额度重置后再缩放（`src/storage/thumbnails.ts`）。没有这个绑定时，`size` 参数会被忽略。
 
 **客户端兼容性备注**：部分 Subsonic 客户端（实测 Amperfy）在真正调用 API 之前会先探测裸的服务器地址 `/`，把非 2xx 响应当成"服务器不存在"，导致登录直接报 404。现在 `/`（连同其它非 `/rest/*` 路径）由 Web UI 的静态资源应答，天然是 `200`，这个兼容问题顺带解决了，见下面 [Web UI](#web-ui)。
 

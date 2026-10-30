@@ -100,7 +100,7 @@ onMounted(load);
           :to="{ name: 'album', params: { id: al.id } }"
           class="glass w-32 shrink-0 p-2 transition-transform hover:scale-[1.03]"
         >
-          <img v-if="al.coverArt" :src="coverArtUrl(al.coverArt)" :alt="al.name" class="aspect-square w-full rounded-lg object-cover" />
+          <img v-if="al.coverArt" :src="coverArtUrl(al.coverArt, 300)" :alt="al.name" class="aspect-square w-full rounded-lg object-cover" />
           <div v-else class="aspect-square w-full rounded-lg bg-white/5"></div>
           <div class="mt-2 truncate text-sm">{{ al.name }}</div>
           <div class="truncate text-xs text-[var(--text-dim)]">{{ al.artist }}</div>

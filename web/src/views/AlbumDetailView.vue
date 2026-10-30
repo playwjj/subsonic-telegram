@@ -72,7 +72,7 @@ async function handleDelete(song: Song) {
 <template>
   <div v-if="album" class="album-detail">
     <div class="header glass mb-6 p-4">
-      <img v-if="album.coverArt" class="cover" :src="coverArtUrl(album.coverArt)" :alt="album.name" />
+      <img v-if="album.coverArt" class="cover" :src="coverArtUrl(album.coverArt, 600)" :alt="album.name" />
       <div v-else class="cover"></div>
       <div class="info">
         <h1>{{ album.name }}</h1>

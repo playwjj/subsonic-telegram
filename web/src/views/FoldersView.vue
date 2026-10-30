@@ -923,7 +923,7 @@ const columns: { key: SortKey; label: string; class: string }[] = [
             <input type="checkbox" :checked="selected.has(entry.key)" @click.stop="onCheckboxClick($event, entry)" />
             <span v-if="entry.kind === 'dir'" class="icon">📁</span>
             <button v-else class="icon play" title="Play" @click.stop="openEntry(entry)">
-              <img :src="coverArtUrl(entry.song.coverArt)" alt="" loading="lazy" />
+              <img :src="coverArtUrl(entry.song.coverArt, 300)" alt="" loading="lazy" />
               <span>{{ isPlaying(entry) ? "♪" : "▶" }}</span>
             </button>
 
@@ -1017,7 +1017,7 @@ const columns: { key: SortKey; label: string; class: string }[] = [
             />
             <button class="card-more" title="More actions" @click.stop="openMenuAt($event, entry)">⋯</button>
             <div v-if="entry.kind === 'dir'" class="thumb">📁</div>
-            <img v-else class="thumb" :src="coverArtUrl(entry.song.coverArt)" alt="" loading="lazy" />
+            <img v-else class="thumb" :src="coverArtUrl(entry.song.coverArt, 300)" alt="" loading="lazy" />
             <input
               v-if="renamingKey === entry.key"
               v-model="renameValue"

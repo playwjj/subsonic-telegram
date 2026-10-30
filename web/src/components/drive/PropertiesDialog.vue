@@ -52,7 +52,7 @@ const rows = computed<[string, string | undefined][]>(() => {
 <template>
   <Modal :title="song ? song.title : folder?.name" @close="emit('close')">
     <div class="flex gap-4">
-      <img v-if="song" :src="coverArtUrl(song.coverArt)" class="h-20 w-20 shrink-0 rounded-lg object-cover" alt="" />
+      <img v-if="song" :src="coverArtUrl(song.coverArt, 300)" class="h-20 w-20 shrink-0 rounded-lg object-cover" alt="" />
       <div v-else class="text-5xl">📁</div>
     </div>
     <dl class="mt-4 grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1.5 text-sm">

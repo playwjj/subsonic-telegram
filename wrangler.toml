@@ -13,6 +13,12 @@ not_found_handling = "single-page-application"
 [ai]
 binding = "AI"
 
+# Images: resizes covers to the size clients ask for (src/storage/thumbnails.ts).
+# The free plan's 5,000 unique resizes a month cover a library this size;
+# past that, covers are served full size until the next month.
+[images]
+binding = "IMAGES"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "subsonic-telegram"

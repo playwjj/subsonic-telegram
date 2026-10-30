@@ -60,7 +60,7 @@ const starred = computed(() => !!currentTrack.value?.starred);
   <template v-if="currentTrack">
     <div v-if="playerState.view === 'bar'" class="player-bar glass">
       <button class="cover-btn" title="Open player" @click="setView('full')">
-        <img class="cover" :src="currentTrack.coverArt ? coverArtUrl(currentTrack.coverArt) : '/music-cover.jpg'" alt="" />
+        <img class="cover" :src="currentTrack.coverArt ? coverArtUrl(currentTrack.coverArt, 300) : '/music-cover.jpg'" alt="" />
         <span class="cover-hint">⤢</span>
       </button>
       <div class="meta" @click="setView('full')">

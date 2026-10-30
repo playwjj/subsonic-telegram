@@ -61,7 +61,7 @@ onMounted(async () => {
           :to="{ name: 'album', params: { id: al.id } }"
           class="glass p-2 transition-transform hover:scale-[1.03]"
         >
-          <img v-if="al.coverArt" :src="coverArtUrl(al.coverArt)" :alt="al.name" class="aspect-square w-full rounded-lg object-cover" />
+          <img v-if="al.coverArt" :src="coverArtUrl(al.coverArt, 300)" :alt="al.name" class="aspect-square w-full rounded-lg object-cover" />
           <div v-else class="aspect-square w-full rounded-lg bg-white/5"></div>
           <div class="mt-2 truncate text-sm">{{ al.name }}</div>
           <div class="truncate text-xs text-[var(--text-dim)]">{{ al.artist }}</div>
@@ -78,7 +78,7 @@ onMounted(async () => {
           :to="{ name: 'artist', params: { id: a.id } }"
           class="flex items-center gap-3 py-2"
         >
-          <img v-if="a.coverArt" :src="coverArtUrl(a.coverArt)" :alt="a.name" class="h-10 w-10 rounded-full object-cover" />
+          <img v-if="a.coverArt" :src="coverArtUrl(a.coverArt, 300)" :alt="a.name" class="h-10 w-10 rounded-full object-cover" />
           <div v-else class="h-10 w-10 rounded-full bg-white/5"></div>
           <span class="truncate">{{ a.name }}</span>
         </RouterLink>
