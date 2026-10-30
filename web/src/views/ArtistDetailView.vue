@@ -12,9 +12,11 @@ async function load(id: string) {
   error.value = "";
   artist.value = null;
   try {
-    artist.value = await getArtist(id);
+    const result = await getArtist(id);
+    // Moved on to another artist while this one loaded.
+    if (id === props.id) artist.value = result;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "Failed to load";
+    if (id === props.id) error.value = e instanceof Error ? e.message : "Failed to load";
   }
 }
 watch(() => props.id, load, { immediate: true });

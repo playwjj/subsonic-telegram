@@ -6,13 +6,22 @@ import { coverArtUrl, getPlayQueue, savePlayQueue, scrobble, star, streamUrl, un
 
 const audio = new Audio();
 
-// Record a play only once playback has stuck around a bit — skips within
-// the first few seconds shouldn't count toward play history/stats.
-const SCROBBLE_DELAY_MS = 5000;
-let scrobbleTimer: ReturnType<typeof setTimeout> | undefined;
-// Set when a track is loaded without autoplay (a restored queue), so the
-// scrobble timer is armed on the first real play instead.
-let scrobblePending = false;
+// Record a play only once this much of the song has actually been heard —
+// skips, and time spent buffering or paused, shouldn't count toward play
+// history/stats.
+const SCROBBLE_AFTER_SEC = 5;
+let heardSec = 0;
+let lastTime: number | undefined; // audio.currentTime at the previous timeupdate
+let scrobbled = false;
+
+// Streams that failed in a row; past this, stop skipping ahead (the
+// server or network is down, not just one file).
+const MAX_SKIPS_ON_ERROR = 3;
+let failedInARow = 0;
+
+// The seek to a restored queue's saved position, waiting for its track's
+// metadata — dropped if another track is loaded first.
+let pendingSeek: (() => void) | undefined;
 
 // "Previous" restarts the current track instead once it's past this point,
 // like every other media player.
@@ -94,6 +103,28 @@ audio.volume = state.volume;
 audio.addEventListener("timeupdate", () => {
   state.currentTime = audio.currentTime;
   if (audio.currentTime >= WARM_NEXT_AFTER_SEC) warmNext();
+  // Steps of normal playback only: a jump (a seek) isn't time heard.
+  const step = lastTime === undefined ? 0 : audio.currentTime - lastTime;
+  lastTime = audio.currentTime;
+  if (audio.paused || step <= 0 || step > 2) return;
+  heardSec += step;
+  const track = state.queue[state.currentIndex];
+  if (!scrobbled && track && heardSec >= SCROBBLE_AFTER_SEC) {
+    scrobbled = true;
+    void scrobble(track.id).catch(() => {});
+  }
+});
+audio.addEventListener("playing", () => {
+  failedInARow = 0;
+});
+// A stream that fails (Worker/Telegram error, file gone) would otherwise
+// leave the player showing "playing" with nothing coming out: move on to
+// the next song, unless several have failed in a row.
+audio.addEventListener("error", () => {
+  if (!audio.getAttribute("src")) return; // cleared on purpose (clearQueue)
+  state.isPlaying = false;
+  updateMediaSessionState();
+  if (++failedInARow <= MAX_SKIPS_ON_ERROR) next();
 });
 audio.addEventListener("loadedmetadata", () => {
   state.duration = audio.duration;
@@ -110,7 +141,8 @@ audio.addEventListener("pause", () => {
 audio.addEventListener("ended", () => {
   if (state.repeat === "one") {
     audio.currentTime = 0;
-    void audio.play();
+    resetHeard();
+    play();
     return;
   }
   next();
@@ -133,30 +165,39 @@ function shuffleAround(tracks: Song[], first: Song | undefined): Song[] {
   return [first, ...shuffled(tracks.filter((t) => t !== first))];
 }
 
-function armScrobble(track: Song): void {
-  scrobblePending = false;
-  clearTimeout(scrobbleTimer);
-  scrobbleTimer = setTimeout(() => {
-    void scrobble(track.id).catch(() => {});
-  }, SCROBBLE_DELAY_MS);
+function resetHeard(): void {
+  heardSec = 0;
+  lastTime = undefined;
+  scrobbled = false;
+}
+
+// play() rejects when it's interrupted by the next load (quick skipping) or
+// blocked by autoplay rules; the audio events already say what happened.
+function play(): void {
+  audio.play().catch(() => {});
 }
 
 function loadCurrent(autoplay = true, startAt = 0): void {
-  clearTimeout(scrobbleTimer);
   const track = state.queue[state.currentIndex];
   if (!track) return;
+  if (pendingSeek) audio.removeEventListener("loadedmetadata", pendingSeek);
+  pendingSeek = undefined;
+  resetHeard();
   audio.src = streamUrl(track.id);
+  // The old song's position and length until the new one's metadata arrives.
+  state.currentTime = startAt;
+  state.duration = track.duration ?? 0;
   if (startAt > 0) {
-    audio.addEventListener("loadedmetadata", () => (audio.currentTime = startAt), { once: true });
+    const seek = () => {
+      pendingSeek = undefined;
+      audio.currentTime = startAt;
+    };
+    pendingSeek = seek;
+    audio.addEventListener("loadedmetadata", seek, { once: true });
   }
   updateMediaSessionMetadata(track);
   persistQueue();
-  if (!autoplay) {
-    scrobblePending = true;
-    return;
-  }
-  void audio.play();
-  armScrobble(track);
+  if (autoplay) play();
 }
 
 export function playQueue(tracks: Song[], startIndex = 0): void {
@@ -214,8 +255,7 @@ export function toggle(): void {
     audio.pause();
     return;
   }
-  void audio.play();
-  if (scrobblePending) armScrobble(track);
+  play();
 }
 
 export function next(): void {
@@ -300,7 +340,6 @@ export function removeFromQueue(index: number): void {
 }
 
 export function clearQueue(): void {
-  clearTimeout(scrobbleTimer);
   audio.pause();
   audio.removeAttribute("src");
   audio.load();

@@ -109,7 +109,7 @@ const sortedItems = computed(() =>
             </div>
           </div>
           <button
-            v-if="item.status === 'queued' || item.status === 'uploading' || item.status === 'processing'"
+            v-if="item.status === 'queued' || item.status === 'uploading'"
             class="icon"
             title="Cancel"
             @click="cancel(item)"

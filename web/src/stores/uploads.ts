@@ -259,8 +259,11 @@ async function run(item: UploadItem) {
   }
 }
 
+// Not once it's "processing": the file has reached the Worker, which goes
+// on to store it whatever the browser does — calling that cancelled (and
+// offering a retry) would end in a duplicate.
 export function cancel(item: UploadItem): void {
-  if (item.status !== "queued" && item.status !== "uploading" && item.status !== "processing") return;
+  if (item.status !== "queued" && item.status !== "uploading") return;
   item.status = "cancelled";
   aborts.get(item.id)?.();
 }
@@ -277,7 +280,11 @@ export function retry(item: UploadItem): void {
 }
 
 export function retryFailed(): void {
-  for (const item of uploads.items) if (item.status === "failed") item.status = "queued";
+  for (const item of uploads.items) {
+    if (item.status !== "failed") continue;
+    item.status = "queued";
+    item.error = undefined;
+  }
   pump();
 }
 

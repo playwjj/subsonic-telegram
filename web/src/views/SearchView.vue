@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { search3, coverArtUrl, getArtists, getRandomSongs, type Artist, type Album, type Song } from "../api/subsonic";
+import { search3, coverArtUrl, getAlbumList2, getRandomSongs, type Artist, type Album, type Song } from "../api/subsonic";
 import { playQueue } from "../stores/player";
 import TrackRow from "../components/TrackRow.vue";
 
@@ -9,11 +9,15 @@ const artists = ref<Artist[]>([]);
 const albums = ref<Album[]>([]);
 const songs = ref<Song[]>([]);
 const searched = ref(false);
+const searchError = ref("");
+// Bumped per search, so a slow answer to an older query can't replace a
+// newer one's.
+let searchToken = 0;
 let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
 // Shown before a query is typed, and again as a fallback below "No results."
 // so the page never renders as a dead end.
-const discoverArtists = ref<Artist[]>([]);
+const discoverArtists = ref<{ id: string; name: string }[]>([]);
 const discoverSongs = ref<Song[]>([]);
 
 function onInput() {
@@ -22,7 +26,9 @@ function onInput() {
 }
 
 async function runSearch() {
+  const token = ++searchToken;
   const q = query.value.trim();
+  searchError.value = "";
   if (!q) {
     artists.value = [];
     albums.value = [];
@@ -30,29 +36,26 @@ async function runSearch() {
     searched.value = false;
     return;
   }
-  const result = await search3(q);
-  artists.value = result.artist;
-  albums.value = result.album;
-  songs.value = result.song;
-  searched.value = true;
-}
-
-function sample<T>(items: T[], count: number): T[] {
-  const copy = [...items];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
+  try {
+    const result = await search3(q);
+    if (token !== searchToken) return;
+    artists.value = result.artist;
+    albums.value = result.album;
+    songs.value = result.song;
+    searched.value = true;
+  } catch (e) {
+    if (token === searchToken) searchError.value = e instanceof Error ? e.message : String(e);
   }
-  return copy.slice(0, count);
 }
 
-// Independent: the full artist index is the slow one, and the songs
-// shouldn't wait for it.
+// Independent: neither list should wait for the other. Artists come from a
+// random sample of albums — the server picks those without reading the
+// whole library, unlike the full artist index.
 onMounted(() => {
-  getArtists().then(
-    (index) => (discoverArtists.value = sample(index.flatMap((group) => group.artist), 8)),
-    () => {},
-  );
+  getAlbumList2({ type: "random", size: 24 }).then((list) => {
+    const seen = new Map(list.map((al) => [al.artistId, al.artist] as const));
+    discoverArtists.value = [...seen].slice(0, 8).map(([id, name]) => ({ id, name }));
+  }, () => {});
   getRandomSongs(8).then(
     (random) => (discoverSongs.value = random),
     () => {},
@@ -63,6 +66,8 @@ onMounted(() => {
 <template>
   <div class="search">
     <input v-model="query" placeholder="Search artists, albums, songs…" autofocus @input="onInput" />
+
+    <p v-if="searchError" class="text-sm text-[var(--danger)]">Search failed: {{ searchError }}</p>
 
     <template v-if="!searched">
       <section v-if="discoverArtists.length" class="discover">

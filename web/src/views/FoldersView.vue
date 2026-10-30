@@ -95,8 +95,12 @@ let searchToken = 0;
 
 async function runSearch(q: string) {
   const token = ++searchToken;
-  const results = await getFolderSongs(currentPath.value, q);
-  if (token === searchToken) searchResults.value = results;
+  try {
+    const results = await getFolderSongs(currentPath.value, q);
+    if (token === searchToken) searchResults.value = results;
+  } catch (e) {
+    if (token === searchToken) error.value = e instanceof Error ? e.message : String(e);
+  }
 }
 
 watch(query, (value) => {

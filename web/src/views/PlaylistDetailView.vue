@@ -16,7 +16,9 @@ const playlist = ref<PlaylistDetail | null>(null);
 const router = useRouter();
 
 async function load(id: string) {
-  playlist.value = await getPlaylist(id);
+  const result = await getPlaylist(id);
+  // Moved on to another playlist while this one loaded.
+  if (id === props.id) playlist.value = result;
 }
 watch(() => props.id, load, { immediate: true });
 

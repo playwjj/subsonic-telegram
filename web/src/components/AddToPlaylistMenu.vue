@@ -8,13 +8,21 @@ const open = ref(false);
 const playlists = ref<Playlist[]>([]);
 const loading = ref(false);
 const newName = ref("");
+const error = ref("");
+
+function failed(e: unknown) {
+  error.value = e instanceof Error ? e.message : String(e);
+}
 
 async function toggle() {
   open.value = !open.value;
+  error.value = "";
   if (open.value) {
     loading.value = true;
     try {
       playlists.value = await getPlaylists();
+    } catch (e) {
+      failed(e);
     } finally {
       loading.value = false;
     }
@@ -22,16 +30,24 @@ async function toggle() {
 }
 
 async function addTo(playlistId: string) {
-  await updatePlaylist({ playlistId, songIdToAdd: [props.songId] });
-  open.value = false;
+  try {
+    await updatePlaylist({ playlistId, songIdToAdd: [props.songId] });
+    open.value = false;
+  } catch (e) {
+    failed(e);
+  }
 }
 
 async function createAndAdd() {
   const name = newName.value.trim();
   if (!name) return;
-  await createPlaylist({ name, songIds: [props.songId] });
-  newName.value = "";
-  open.value = false;
+  try {
+    await createPlaylist({ name, songIds: [props.songId] });
+    newName.value = "";
+    open.value = false;
+  } catch (e) {
+    failed(e);
+  }
 }
 </script>
 
@@ -40,6 +56,7 @@ async function createAndAdd() {
     <button class="icon-btn" title="Add to playlist" @click="toggle">+</button>
     <div v-if="open" class="dropdown">
       <p v-if="loading" class="hint">Loading…</p>
+      <p v-if="error" class="hint error">{{ error }}</p>
       <button v-for="p in playlists" :key="p.id" class="option" @click="addTo(p.id)">{{ p.name }}</button>
       <div class="new-row">
         <input v-model="newName" placeholder="New playlist" @keyup.enter="createAndAdd" />
@@ -109,5 +126,9 @@ async function createAndAdd() {
 .hint {
   opacity: 0.7;
   font-size: 0.85rem;
+}
+.hint.error {
+  opacity: 1;
+  color: var(--danger);
 }
 </style>

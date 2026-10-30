@@ -16,17 +16,23 @@ const loading = ref(true);
 const error = ref("");
 const editing = ref<Song | null>(null);
 
+// Bumped per load, so paging or re-sorting quickly can't end on an older,
+// slower answer.
+let loadToken = 0;
+
 async function load() {
+  const token = ++loadToken;
   loading.value = true;
   error.value = "";
   try {
     const result = await getSongs({ size: PAGE_SIZE, offset: page.value * PAGE_SIZE, sort: sort.value });
+    if (token !== loadToken) return;
     songs.value = result.songs;
     total.value = result.total;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    if (token === loadToken) error.value = e instanceof Error ? e.message : String(e);
   } finally {
-    loading.value = false;
+    if (token === loadToken) loading.value = false;
   }
 }
 
@@ -39,7 +45,12 @@ function changeSort(next: SongSort) {
 
 async function handleDelete(song: Song) {
   if (!confirm(`Move "${song.title}" to the trash? You can restore it from Folders → Trash.`)) return;
-  await deleteTrack(song.id);
+  try {
+    await deleteTrack(song.id);
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+    return;
+  }
   songs.value = songs.value.filter((s) => s.id !== song.id);
   total.value--;
 }

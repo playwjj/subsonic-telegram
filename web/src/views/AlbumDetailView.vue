@@ -19,9 +19,11 @@ async function load(id: string) {
   error.value = "";
   album.value = null;
   try {
-    album.value = await getAlbum(id);
+    const result = await getAlbum(id);
+    // Moved on to another album while this one loaded.
+    if (id === props.id) album.value = result;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "Failed to load";
+    if (id === props.id) error.value = e instanceof Error ? e.message : "Failed to load";
   }
 }
 watch(() => props.id, load, { immediate: true });

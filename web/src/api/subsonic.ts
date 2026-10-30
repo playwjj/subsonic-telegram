@@ -48,8 +48,11 @@ function buildUrl(endpoint: string, params: Params = {}, creds?: Credentials): s
 }
 
 async function parseResponse<T>(res: Response): Promise<T> {
-  const data = (await res.json()) as { "subsonic-response": any };
-  const body = data["subsonic-response"];
+  // A gateway error page, 413 and the like aren't JSON: say what happened
+  // rather than "Unexpected token '<'".
+  const data = (await res.json().catch(() => null)) as { "subsonic-response"?: any } | null;
+  const body = data?.["subsonic-response"];
+  if (!body) throw new Error(res.ok ? "Invalid server response" : `HTTP ${res.status}`);
   if (body.status !== "ok") {
     throw new SubsonicError(body.error?.code ?? 0, body.error?.message ?? "Unknown error", body.error?.retryAfter);
   }
