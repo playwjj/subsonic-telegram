@@ -9,12 +9,14 @@
 // once the quota is back.
 
 // Requested sizes snap up to one of these, so a cover never costs more
-// than two resizes. Anything bigger gets the original.
+// than two resizes. Only an explicit size above them gets the original: a
+// client that doesn't say (or says nonsense) gets the largest, which is
+// plenty for any screen it shows a cover on.
 const THUMB_SIZES = [300, 600];
 
 export function thumbWidth(requested: string | null): number | null {
   const size = Number(requested);
-  if (!requested || !Number.isFinite(size) || size <= 0) return null;
+  if (!requested || !Number.isFinite(size) || size <= 0) return THUMB_SIZES[THUMB_SIZES.length - 1];
   return THUMB_SIZES.find((w) => size <= w) ?? null;
 }
 
